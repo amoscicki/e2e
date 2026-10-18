@@ -62,6 +62,12 @@ jobs:
         run: node packages/web/dist/bin.js install chromium --with-deps
       - name: Testbed
         run: pnpm --filter @e2e-dev/testbed test
+      # Every engine call crosses the engine protocol, so a contract change
+      # a remote engine could not receive fails here.
+      - name: Testbed over the engine protocol
+        run: pnpm --filter @e2e-dev/testbed exec node node_modules/e2e/dist/cli/bin.js run
+        env:
+          E2E_ENGINE_LOOPBACK: '1'
 
   test:
     runs-on: blacksmith-4vcpu-ubuntu-2404

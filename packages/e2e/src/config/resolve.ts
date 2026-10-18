@@ -258,7 +258,7 @@ export function resolveConfig(
   const targets = resolveTargets(raw.targets, options.projectRoot, (target, where) => ({
     trace: targetRecording(recordings.trace, target.trace, `${where} trace`, 'trace'),
     video: targetRecording(recordings.video, target.video, `${where} video`, 'video'),
-  }));
+  }), envFlag(env, 'E2E_ENGINE_LOOPBACK'));
   const tests = normalizeTests(raw.tests, options.projectRoot);
 
   const timeout = positiveInt(raw.timeout, 'timeout', 'milliseconds') ?? 120_000;

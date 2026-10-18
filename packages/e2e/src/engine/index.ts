@@ -857,3 +857,18 @@ export interface EngineHandle extends Engine {
 }
 
 export { defineEngine, isEngineHandle } from './manifest.ts';
+
+export { connectEngine, type ConnectEngineOptions } from './protocol/client.ts';
+export { describeEngine, serveEngine } from './protocol/server.ts';
+export {
+  loopbackTransport,
+  socketTransport,
+  spawnTransport,
+  type EngineTransport,
+  type SocketTransportOptions,
+  type SpawnTransportOptions,
+  type TransportConnection,
+  type TransportContext,
+} from './protocol/transport.ts';
+export { ENGINE_METHODS, ENGINE_PROTOCOL_VERSION, type EngineManifest, type EngineMethod } from './protocol/protocol.ts';
+export type { MessageStreams } from './protocol/connection.ts';

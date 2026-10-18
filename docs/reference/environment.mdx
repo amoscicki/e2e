@@ -172,6 +172,7 @@ What is sent and how to read it is on the [Telemetry](/telemetry) page.
 
 | Variable | Example | Reading | Effect |
 | --- | --- | --- | --- |
+| `E2E_ENGINE_LOOPBACK` | `E2E_ENGINE_LOOPBACK=1` | flag | Serves every target's engine in process over the [engine protocol](/reference/engine-protocol#testing-an-engine-over-the-protocol), so each call crosses its wire format |
 | `PLAYWRIGHT_BROWSERS_PATH` | `PLAYWRIGHT_BROWSERS_PATH=~/.cache/ms-playwright` | value | Playwright's browser cache, honored by the engine's `prepare` hook |
 | `PLAYWRIGHT_SKIP_BROWSER_GC` | `PLAYWRIGHT_SKIP_BROWSER_GC=0` | value | Defaults to `1` for the engine's browser install, which keeps other browsers in the cache. `0` lets the install remove them |
 | `KERNEL_API_KEY` | `KERNEL_API_KEY=<key>` | value | The API key `kernel()` from `@e2e-dev/kernel` creates browsers with. Unset, the browser lease fails. See [Kernel](/integrations/kernel) |
