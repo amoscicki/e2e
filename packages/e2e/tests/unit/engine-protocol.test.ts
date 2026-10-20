@@ -25,6 +25,7 @@ import {
 } from '../../src/engine/index.ts';
 import { resolveConfig } from '../../src/config/resolve.ts';
 import { ConfigurationError, TestTimeoutError } from '../../src/internal/errors.ts';
+import { isEngineClient } from '../../src/engine/protocol/client.ts';
 import { Connection } from '../../src/engine/protocol/connection.ts';
 import type { EngineTransport } from '../../src/engine/protocol/transport.ts';
 import { secretHandle } from '../../src/secrets.ts';
@@ -328,15 +329,20 @@ describe('engine protocol', () => {
     }
   });
 
-  it('serves every target through the protocol when E2E_ENGINE_LOOPBACK is set', () => {
+  it('serves every in-process target through one protocol client and leaves a connected engine as declared', () => {
     const engine = defineEngine(toy());
-    const config = (env: Record<string, string>) =>
-      resolveConfig({ targets: [{ name: 'toy', platform: 'toy', engine }] }, { projectRoot: process.cwd(), env: env as NodeJS.ProcessEnv });
-    expect(config({}).targets[0]?.engine).toBe(engine);
-    const served = config({ E2E_ENGINE_LOOPBACK: '1' }).targets[0]?.engine;
+    const { remote } = overLoopback(toy());
+    const config = resolveConfig(
+      { targets: [{ name: 'toy', platform: 'toy', engine }, { name: 'remote', platform: 'toy', engine: remote }] },
+      { projectRoot: process.cwd(), env: {} as NodeJS.ProcessEnv },
+    );
+    const served = config.targets[0]?.engine;
     expect(served).not.toBe(engine);
+    expect(isEngineClient(served!)).toBe(true);
     expect(served?.name).toBe('toy');
     expect([...(served?.capabilities ?? [])]).toEqual([...engine.capabilities]);
+    expect(config.targets[1]?.engine).toBe(remote);
+    expect(resolveConfig({ targets: [{ name: 'toy', platform: 'toy', engine }] }, { projectRoot: process.cwd(), env: {} as NodeJS.ProcessEnv }).targets[0]?.engine).toBe(served);
   });
 
   it('rejects a malformed manifest at config load', () => {

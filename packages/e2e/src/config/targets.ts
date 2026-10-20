@@ -5,7 +5,7 @@
  */
 
 import { isEngineHandle, type EngineHandle } from '../engine/index.ts';
-import { loopbackEngine } from '../engine/protocol/client.ts';
+import { isEngineClient, loopbackEngine } from '../engine/protocol/client.ts';
 import { ConfigurationError } from '../internal/errors.ts';
 import type { ResolvedRecording } from '../internal/recording-modes.ts';
 import type { Target } from '../types.ts';
@@ -37,15 +37,14 @@ export const TARGET_NAME_PATTERN = /^(?!\.+$)[A-Za-z0-9_.-]+$/;
 
 /**
  * Resolves `targets`: each target's name, platform, engine, recordings, and
- * app, without the run's ports. With `loopback`, every engine is served in
- * this process over the engine protocol, so each call crosses the wire
- * format a remote engine would receive.
+ * app, without the run's ports. An engine in this process is served over
+ * the engine protocol, so each call crosses the wire format a remote engine
+ * would receive.
  */
 export function resolveTargets(
   declared: unknown,
   projectRoot: string,
   recordings: (target: Target, where: string) => Pick<ResolvedTarget, 'trace' | 'video'>,
-  loopback = false,
 ): readonly ResolvedTarget[] {
   if (declared === undefined) {
     throw new ConfigurationError(
@@ -91,7 +90,7 @@ export function resolveTargets(
     }
     seen.add(name);
     if (target.name === undefined) defaulted.add(name);
-    const engine = loopback && target.engine !== undefined ? loopbackEngine(target.engine) : target.engine;
+    const engine = target.engine === undefined || isEngineClient(target.engine) ? target.engine : loopbackEngine(target.engine);
     const declaredApp = checkTargetApp(name, engine, target.app);
     return {
       name,

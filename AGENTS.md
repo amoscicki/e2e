@@ -89,9 +89,9 @@ suites that consume the built packages the way a user would.
 - `packages/e2e/src/engine/protocol/` - the engine protocol: the engine
   contract as LSP-style JSON-RPC (`connectEngine` client, `serveEngine`
   server, spawn/socket/loopback transports), so an engine can run in
-  another process, machine, or language. `E2E_ENGINE_LOOPBACK=1` serves
-  every engine through it in process; the testbed runs that way in CI, so
-  a contract change that cannot cross the wire fails there.
+  another process, machine, or language. Every engine in this process
+  runs through it over `loopbackTransport`, so a contract change that
+  cannot cross the wire fails in every suite.
 - `packages/kernel` - the published `@e2e-dev/kernel` package: Kernel hosted
   browsers for the web engine. An official integration with a hosted service
   is one package per service, named after it (`@e2e-dev/<service>`), with the

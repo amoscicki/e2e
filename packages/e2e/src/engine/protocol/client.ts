@@ -471,7 +471,17 @@ export function connectEngine(options: ConnectEngineOptions): EngineHandle {
       }
     },
   };
-  return defineEngine(engine);
+  const handle = defineEngine(engine);
+  clients.add(handle);
+  return handle;
+}
+
+/** Handles `connectEngine` made, which already speak the protocol. */
+const clients = new WeakSet<EngineHandle>();
+
+/** Whether `engine` is a protocol client from `connectEngine`, rather than an engine in this process. */
+export function isEngineClient(engine: EngineHandle): boolean {
+  return clients.has(engine);
 }
 
 /** The runner version `initialize` reports; servers check the protocol version, never this. */
@@ -630,18 +640,26 @@ function manifestMismatch(declared: EngineManifest, announced: EngineManifest | 
   return fields.map((field) => `${field} is "${actual[field]}", declared "${expected[field]}"`).join('; ');
 }
 
+/** The client each in-process engine is served through, so every config load gets the same one. */
+const loopbacks = new WeakMap<EngineHandle, EngineHandle>();
+
 /**
- * `engine` served in this process over the protocol: the client handle a
- * suite runs on under `E2E_ENGINE_LOOPBACK`. Every engine member crosses the
- * wire; fixtures, the app check, and the declared secrets stay the engine's
- * own, since they belong to the client half of any engine.
+ * `engine` served in this process over the protocol: the client handle every
+ * target runs on. Every engine member crosses the wire; fixtures, the app
+ * check, and the declared secrets stay the engine's own, since they belong
+ * to the client half of any engine. One engine always gets the same client,
+ * so a handle two targets or two config loads share stays one instance.
  */
 export function loopbackEngine(engine: EngineHandle): EngineHandle {
-  return connectEngine({
+  const known = loopbacks.get(engine);
+  if (known !== undefined) return known;
+  const client = connectEngine({
     manifest: describeEngine(engine),
     transport: loopbackTransport(engine),
     ...(engine.secrets === undefined ? {} : { secrets: engine.secrets }),
     ...(engine.fixtures === undefined ? {} : { fixtures: engine.fixtures }),
     ...(engine.validateApp === undefined ? {} : { validateApp: engine.validateApp }),
   });
+  loopbacks.set(engine, client);
+  return client;
 }

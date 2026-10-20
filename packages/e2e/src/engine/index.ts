@@ -843,7 +843,8 @@ export interface Engine {
   endAttempt?(context: EngineCleanupContext): Promise<void>;
   /**
    * Worker shutdown, within the cleanup budget; failure is a run error. Runs
-   * whether or not `init` ran, so it MUST tolerate a cold engine. A live
+   * once `init` was called, even when it failed, so it MUST tolerate a
+   * partly initialized engine. A live
    * `reuseSignal` permits preserving run-owned resources for a replacement,
    * until that permission is revoked or this hook settles.
    */

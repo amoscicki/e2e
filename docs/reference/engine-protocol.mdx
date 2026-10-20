@@ -83,6 +83,8 @@ runner, one connection per target lives from `prepare` to `finish`, and
 opens only when the server answers `lifecycle/prepare` or
 `lifecycle/finish`. In each worker, one connection lives from `init` to
 `dispose`. A call outside `init`..`dispose` fails with `INVALID_STATE`.
+A worker that never ran `init` has no connection, so the server gets no
+`lifecycle/dispose` for it.
 Whether two connections share state is the server's choice: a spawned
 server gets a process per connection, and a loopback or socket server may
 serve them all from one engine.
@@ -333,27 +335,12 @@ Any other error code carries the message alone. The harness treats it as
 an infrastructure failure, as it treats a plain `Error` from a local
 engine.
 
-## Testing an engine over the protocol
+## Engines in the runner's process
 
-Set `E2E_ENGINE_LOOPBACK=1` to serve every target's engine over the
-protocol, in the same process, through in-memory streams. Each call crosses the wire format a remote
-server would receive, so a suite that passes this way needs nothing the
-protocol cannot carry. Fixtures, `validateApp`, and declared secrets stay
-the engine's own.
-
-<CodeGroup>
-```bash npm
-E2E_ENGINE_LOOPBACK=1 npx e2e run
-```
-
-```bash pnpm
-E2E_ENGINE_LOOPBACK=1 pnpm exec e2e run
-```
-
-```bash bun
-E2E_ENGINE_LOOPBACK=1 bunx e2e run
-```
-</CodeGroup>
+An engine built with `defineEngine` runs through the protocol too, over
+`loopbackTransport`: every call crosses the wire format a remote engine
+receives. An engine that passes its suite needs nothing the protocol cannot
+carry. Fixtures, `validateApp`, and declared secrets stay the engine's own.
 
 ## Related
 
