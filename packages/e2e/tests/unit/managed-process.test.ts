@@ -75,7 +75,8 @@ describe('ManagedProcess', () => {
     await app.stop();
   }, 20_000);
 
-  it('keeps stopsSettled pending until a stop force-kills a process that ignores SIGTERM at shutdownTimeout', async () => {
+  // Windows has no SIGTERM a process can ignore: the stop ends it at once.
+  it.skipIf(process.platform === 'win32')('keeps stopsSettled pending until a stop force-kills a process that ignores SIGTERM at shutdownTimeout', async () => {
     const port = await freePort();
     const app = new ManagedProcess(
       'app.command',
