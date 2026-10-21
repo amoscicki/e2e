@@ -204,6 +204,8 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
   /** Whether the run's turn came; a teardown before then leaves nothing to tear down. */
   let begun = false;
   let tearingDown: Promise<readonly SerializedError[]> | undefined;
+  const serialize = (cause: unknown, phase: ErrorPhase): SerializedError =>
+    serializeError(classifyError(cause), { phase, projectRoot: config.projectRoot, redact: env.redact });
   /** What a promise the test left rejected with after its turn ended. */
   const lateErrors: SerializedError[] = [];
   const self = {
@@ -216,8 +218,6 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
       lateErrors.push(serialize(error, 'body'));
     },
   };
-  const serialize = (cause: unknown, phase: ErrorPhase): SerializedError =>
-    serializeError(classifyError(cause), { phase, projectRoot: config.projectRoot, redact: env.redact });
   const operation = (signal: AbortSignal, timeoutMs: number): OperationContext => ({ signal, timeoutMs, runId: env.runId, attemptId, origin: 'test' });
 
   const execute = async (): Promise<{ started: Started | undefined; outcome: StandaloneTestOutcome }> => {
