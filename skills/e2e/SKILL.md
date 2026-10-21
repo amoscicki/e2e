@@ -128,11 +128,11 @@ screen.
    the lines after it as far as you can: against the screen at failure, the
    app source, or a live session.
 4. For a screen the evidence and the source leave out, look live (topic
-   `mcp`). `open_session {test: "tests/<feature>.e2e.ts:<line>"}` runs the
-   test and stops on the live screen where it failed: act out the lines
-   after it there, so the next rerun catches every mistake. Otherwise open
-   or reuse a session, go straight to that screen, then `observe` and
-   `locate`. On the web, `navigate` to the path of the `❯ at` URL or the
+   `mcp`). `open_session {test: "tests/<feature>.e2e.ts"}` (with `:<line>`
+   of its `test(` call when the file holds several) runs the test and stops
+   on the live screen where it failed: act out the lines after it there, so
+   the next rerun catches every mistake. Otherwise open or reuse a session,
+   go straight to that screen, then `observe` and `locate`. On the web, `navigate` to the path of the `❯ at` URL or the
    screen's route, and tap only to reach a state no URL opens. A device
    session starts on the app's launch screen: take the shortest path from
    there.

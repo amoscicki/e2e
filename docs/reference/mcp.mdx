@@ -462,6 +462,8 @@ open_session {test: "tests/checkout.e2e.ts:12"}
 - **Selection.** `test` takes what `e2e run` takes as a positional: a file
   with `:line` for the test declared on that line, a file, a directory, a
   glob, or a name. It must select exactly one test on the session's target.
+  The line is the one the `test(` call is on; a line inside the test
+  selects nothing.
 - **What runs.** The test's `beforeAll` hooks, its `test.extend()` fixtures,
   its `beforeEach` hooks, and its body, with the same fixtures, locators,
   `expect`, `timeout`, `actionTimeout`, and `assertionTimeout` as in a run.

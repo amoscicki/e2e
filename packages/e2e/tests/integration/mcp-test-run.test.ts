@@ -317,7 +317,7 @@ describe('open_session {test}', { timeout: 120_000 }, () => {
         return result.text;
       };
       const none = await refused('nothing-here');
-      expect(none).toMatch(/^NO_TESTS: no test file matched nothing-here; .*; name a test file the config finds, with :line for one test in it$/);
+      expect(none).toMatch(/^NO_TESTS: no test file matched nothing-here; .*; name a test file the config finds, alone when it holds one test, or with :line on the line its test\( call is on, not a line inside the test$/);
       expect(await refused('tests/others.e2e.ts:99')).toContain('tests/others.e2e.ts:99 names no test (declared at lines 3, 7, 12, 17)');
       expect(await refused('others')).toBe(
         'TEST_AMBIGUOUS: "others" selects 4 tests on target "web", and a session runs one; name it as file:line: tests/others.e2e.ts:3 "first", tests/others.e2e.ts:7 "second", tests/others.e2e.ts:12 "flow › step one", tests/others.e2e.ts:17 "signed in"',

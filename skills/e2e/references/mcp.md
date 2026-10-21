@@ -135,8 +135,9 @@ When a run's evidence leaves out a screen the fix needs (topic
 `debugging`), don't walk the flow again from the start over `call`. A
 session runs the test and stops where it failed:
 
-1. `open_session {test: "tests/<feature>.e2e.ts:<line>"}`, with the line the
-   test is declared on, or the file alone when it holds one test. The test
+1. `open_session {test: "tests/<feature>.e2e.ts:<line>"}`, where `<line>` is
+   the line of the test's `test(` call, not the failing line inside it. A
+   file that holds one test needs no line. The test
    runs the way `e2e run` runs it: `beforeAll` and `beforeEach` hooks,
    `test.extend` fixtures, and the body, with the same locators, `expect`,
    and timeouts.

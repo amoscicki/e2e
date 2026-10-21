@@ -532,7 +532,7 @@ export class SessionHost {
           .string()
           .min(1)
           .optional()
-          .describe('One test to run in the session first, named the way npx e2e run takes it: tests/checkout.e2e.ts:12 (its declaration line), or a file or name that selects one test. The session then stays on the screen where the test stopped; afterEach hooks and fixture teardown run at close_session. To rerun after editing the test, close_session and open_session with test again'),
+          .describe('One test to run in the session first, named the way npx e2e run takes it: tests/checkout.e2e.ts:12, where 12 is the line its test( call is on (not a failing line inside it), or a file or name that selects one test. The session then stays on the screen where the test stopped; afterEach hooks and fixture teardown run at close_session. To rerun after editing the test, close_session and open_session with test again'),
       }).strict(),
       readOnly: false,
       call: async (args, extra) => textResult(await this.open(args, extra.signal)),

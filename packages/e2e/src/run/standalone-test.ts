@@ -81,7 +81,7 @@ export async function selectStandaloneTest(
   graph: string | undefined,
 ): Promise<StandaloneTest> {
   const collection = await collectAlone(() => collect(config, [positional], graph));
-  const { pairs } = select(collection, config, { targetIds: [target.name] }, { noTestsHint: 'name a test file the config finds, with :line for one test in it' });
+  const { pairs } = select(collection, config, { targetIds: [target.name] }, { noTestsHint: 'name a test file the config finds, alone when it holds one test, or with :line on the line its test( call is on, not a line inside the test' });
   // A serial group's other members run beside a selected one; only what the positional named counts.
   const runnable = pairs.filter((pair) => pair.disposition === 'run' && pair.test.kind === 'test' && pair.test.selected);
   const tests = [...new Map(runnable.map((pair) => [pair.test.id, pair.test])).values()];
