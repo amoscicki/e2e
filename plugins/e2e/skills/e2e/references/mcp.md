@@ -131,9 +131,10 @@ Resources: `e2e://guide` and `e2e://guide/<topic>` hold this skill.
 
 ## Fixing a failing test
 
-When a test fails, don't walk the flow again from the start over `call`,
-and don't rerun it once per fix. Let a session run the test and stop where
-it failed:
+When a test fails, rerun it in a session until it passes. Don't walk the
+flow again from the start over `call`, and don't rerun it with
+`npx e2e run` once per fix. A session runs the test and stops where it
+failed:
 
 1. `open_session {test: "tests/<feature>.e2e.ts:<line>"}`, with the line the
    test is declared on, or the file alone when it holds one test. The test
