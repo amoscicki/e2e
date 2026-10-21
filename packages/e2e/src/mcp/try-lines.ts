@@ -7,6 +7,7 @@
  * line waits, matches, and fails as the same line in a test would. Statements
  * run in order and stop at the first failure, each with its wait capped at
  * the call's `timeout`, and the result ends with what changed on screen.
+ * The statements that pass, reads aside, join the session's `test_lines`.
  *
  * The coding agent is not trusted the way test code is. A Secret reaches the
  * screen only through the authorization `type_secret` runs, on the node the
@@ -60,6 +61,8 @@ interface TryLinesOptions extends TryLinesSession {
   readonly context: StepExecutorContext;
   /** The session's presenter, so the screen comes back as changes since the one the agent holds. */
   readonly screen: ScreenPresenter;
+  /** Told the source of every statement that passed and is not a read, in the order they ran, for `test_lines`. */
+  readonly record?: ((passed: readonly string[]) => void) | undefined;
 }
 
 interface TryLinesArgs {
@@ -85,6 +88,7 @@ export function tryLinesTool(options: TryLinesOptions): ToolSet[string] {
       "Pass statements as they appear in a test body, such as await screen.getByLabel('Email').fill('ada@example.com'); await expect(screen.getByRole('status')).toHaveText('Saved').",
       "They run in order on the session's screen and app with the test API's own waiting, exactly-one rule, and matchers, and stop at the first failure.",
       `The result gives each statement's pass or failure (code and message) and a read's value, then what changed on screen. Each statement waits at most timeout ms (default ${String(TRY_LINES_TIMEOUT_MS)}).`,
+      "Statements that pass, except reads, join test_lines' draft in the order they ran.",
       'The code is parsed, never evaluated as JavaScript: a statement starts with screen, app, or expect(locator), chains getBy* queries, filter, first, last, and nth, and ends in an action, a read, or a matcher.',
       "Arguments are literals, regular expressions, arrays, objects, locators on screen, and credentials.user('name').username.",
       "credentials.user('name').password and secrets.get('name') are accepted only as fill's value, and fill only where type_secret would.",
@@ -122,6 +126,7 @@ async function tryLines(options: TryLinesOptions, runner: LineRunner, args: TryL
       break;
     }
   }
+  options.record?.(outcomes.flatMap((outcome) => ('error' in outcome || isRead(outcome.statement) ? [] : [outcome.statement.source])));
   let screen: string;
   try {
     screen = options.screen.update(await options.context.observe(), { expectChange: false });
@@ -130,6 +135,11 @@ async function tryLines(options: TryLinesOptions, runner: LineRunner, args: TryL
   }
   const failed = outcomes.some((outcome) => 'error' in outcome);
   return { text: render(statements, outcomes, timeout, runtime.redact, screen), failed };
+}
+
+/** Whether a statement only reads, which a test body has no use for once its value is known. */
+function isRead(statement: Statement): boolean {
+  return statement.body.kind === 'call' && statement.body.read;
 }
 
 /**

@@ -104,9 +104,9 @@ Use: screen.getByRole("button", "Sign in")
 
 ## How it tries a test line
 
-The agent runs the lines it's about to write with `try_lines`, in the open
-session, and pastes the ones that pass into the test. A wrong line fails in
-seconds, without a test run:
+The agent runs the lines no action printed, such as assertions, with
+`try_lines` in the open session. The ones that pass join the `test_lines`
+draft. A wrong line fails in seconds, without a test run:
 
 ```text wrap
 Statement 2 of 2 failed; the one before it passed. Each statement waited at most 5000 ms. ...

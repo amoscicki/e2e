@@ -3,8 +3,8 @@
 `e2e mcp` serves a project's live app to a coding agent over MCP (stdio). The
 coding agent drives the app the way the testing agent does: look at a screen
 before writing a test, check a locator or try a test line before committing
-to it. Running tests
-and reading a failed run stay on the CLI (topics `running` and `debugging`).
+to it. Running tests and reading a failed run stay on the CLI (topics
+`running` and `debugging`).
 
 ## Contents
 
@@ -75,8 +75,8 @@ The catalog, per session:
 | `tap`, `double_tap`, `long_press`, `right_click`, `hover`, `type`, `press`, `select`, `check`, `scroll`, `scroll_to`, `drag`, `upload`, `navigate`, `back`, `dismiss_keyboard` | The grammar verbs, as the testing agent gets them: `check` takes `checked`, `drag` a `to` node, `upload` project-relative `files`; `dismiss_keyboard` comes with device engines. On an engine that declares `tapModifiers`, `tap`, `double_tap`, and `right_click` take an optional `modifiers` list (`Shift`, `Control`, `Alt`, `Meta`, `ControlOrMeta`) to hold keys for the click. Each reports what changed on screen and, after its lead, the test line that repeats it (`Test line: await screen.getByRole("button", "Save").tap();`) or `No test line:` and why; `observe` shows the whole screen. A verb the engine cannot honor is not listed and fails with `UNSUPPORTED_CAPABILITY`. |
 | `type_secret` | Fills a configured secret by name: a credential's password into a password field, a `secrets` entry into any editable input; the plaintext never reaches the agent. Listed when the config declares `credentials` or `secrets` and the engine can fill secrets. |
 | `locate` | Tries a semantic locator with exactly one of `role`, `text`, `label`, `placeholder`, `testId` (`name` only with `role`; `exact` optional; anything else is `INVALID_ARGUMENT`) and returns how many nodes match, which, and the `screen.*` call to write. |
-| `try_lines` | Runs test statements (`code`, as a test body writes them) on the session's `screen` and `app` with a test's waits, exactly-one rule, and matchers. Stops at the first failure and returns each statement's pass, failure (code and message), or read value, then what changed on screen. Each statement waits at most `timeout` ms (default 5000). The code is parsed, never evaluated as JavaScript: statements start with `screen`, `app`, or `expect(locator)`; arguments are literals, regexes, arrays, objects, locators, and `credentials.user(name).username`. A secret (`credentials.user(name).password`, `secrets.get(name)`) goes only into `fill`, under `type_secret`'s checks. Engine fixtures (`browser`, `device`), `app.screenshot`, and `toHaveScreenshot` are left out. Anything else is `INVALID_ARGUMENT` naming the token and its line and column, and nothing runs. Reads and matchers see `<secret:name>` where a secret value is. When the config declares a secret or credential, a locator found by part of a text (a regex, an `exact` other than `true`, `hasText`) is `POLICY_DENIED` before anything runs: find it by its exact text. A matcher that expects `<secret:name>` and a regex that repeats a group with a quantifier or `|` inside are `INVALID_ARGUMENT`. |
-| `test_lines` | Every test line the session's actions printed, in order, as a draft test body, starting with `await app.open();` for the session's own opening; an action without a line shows as a `//` comment. A line's locator matched the target alone on the live screen before the action (role and name first, test id last, narrowed to `{ visible: true }`, a container, or `.nth(i)` with a comment when twins share it); a fill names `credentials.user(name)` or `secrets.get(name)`, never a value; a navigation on the app's origin is written as its path. |
+| `try_lines` | Runs test statements (`code`, as a test body writes them) on the session's `screen` and `app` with a test's waits, exactly-one rule, and matchers. Stops at the first failure and returns each statement's pass, failure (code and message), or read value, then what changed on screen. Each statement waits at most `timeout` ms (default 5000). The code is parsed, never evaluated as JavaScript: statements start with `screen`, `app`, or `expect(locator)`; arguments are literals, regexes, arrays, objects, locators, and `credentials.user(name).username`. A secret (`credentials.user(name).password`, `secrets.get(name)`) goes only into `fill`, under `type_secret`'s checks. Engine fixtures (`browser`, `device`), `app.screenshot`, and `toHaveScreenshot` are left out. Anything else is `INVALID_ARGUMENT` naming the token and its line and column, and nothing runs. Reads and matchers see `<secret:name>` where a secret value is. When the config declares a secret or credential, a locator found by part of a text (a regex, an `exact` other than `true`, `hasText`) is `POLICY_DENIED` before anything runs: find it by its exact text. A matcher that expects `<secret:name>` and a regex that repeats a group with a quantifier or `|` inside are `INVALID_ARGUMENT`. The statements that pass, except reads, join `test_lines` as written. |
+| `test_lines` | Every test line the session's actions printed and every statement `try_lines` passed, in order, as a draft test body, starting with `await app.open();` for the session's own opening; an action without a line shows as a `//` comment. A line's locator matched the target alone on the live screen before the action (role and name first, test id last, narrowed to `{ visible: true }`, a container, or `.nth(i)` with a comment when twins share it); a fill names `credentials.user(name)` or `secrets.get(name)`, never a value; a navigation on the app's origin is written as its path. |
 | `screenshot` | The masked pixels as an image. |
 | `tap_at` | Taps a point (`x`, `y` in the latest screenshot's pixels): a listed control under it by id, otherwise the bare point, which an engine without a bare-point tap cannot do. Listed when the engine declares `tap` or a bare-point tap. |
 | `hover_at` | Hovers a point the same way: a listed control under it by id, otherwise the bare point. Listed when the engine declares `hover` or a bare-point hover. |
@@ -115,12 +115,14 @@ Resources: `e2e://guide` and `e2e://guide/<topic>` hold this skill.
    `listitem` by its text: `status "Saved."` on an unlabelled status is its
    text, so match it with `getByRole('status').filter({ hasText: 'Saved.' })`
    or `getByText`.
-3. Try each step's lines before you write them:
+3. Try each line no action printed before you write it, such as an
+   assertion or a line you changed:
    `call {tool: "try_lines", args: {code: "await screen.getByLabel('Email').fill('ada@example.com');\nawait expect(screen.getByRole('status')).toHaveText('Saved');"}}`.
-   Paste the statements that passed into the test as they are. When one
-   fails, fix it from its code and message and the screen in the result,
-   then try only the fixed statement and the ones after it: the app is where
-   the passing statements left it, so starting over repeats their actions.
+   The statements that pass, except reads, join `test_lines` in the order
+   they ran, so the draft holds the whole flow. When one fails, fix it from
+   its code and message and the screen in the result, then try only the
+   fixed statement and the ones after it: the app is where the passing
+   statements left it, so starting over repeats their actions.
    Lines on an engine fixture (`expect(browser).toHaveURL(...)`) can't be
    tried; write them from the screen, whose header names the current path.
    In a project with credentials or secrets, `try_lines` refuses a locator

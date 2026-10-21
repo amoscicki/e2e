@@ -248,6 +248,8 @@ call {tool: "try_lines", args: {code: "await screen.getByLabel('Email').fill('ad
 - The first failure stops the call: the rest don't run, the app stays where
   the passing statements left it, and the result is an error result with the
   code and message a test would get.
+- The statements that pass, except reads, join the
+  [`test_lines`](#test_lines) draft as written, in the order they ran.
 - Each statement waits at most `timeout`. The config's
   [`actionTimeout`](/reference/config#actiontimeout) and
   [`assertionTimeout`](/reference/config#assertiontimeout) still apply when
@@ -297,8 +299,9 @@ short text, and nothing could stop it.
 
 #### `test_lines`
 
-Returns every test line the session's actions printed, in order, as a draft
-test body. Takes no arguments.
+Returns every test line the session's actions printed, and every statement
+[`try_lines`](#try_lines) passed, in order, as a draft test body. Takes no
+arguments.
 
 Each action's result carries its line after the summary:
 

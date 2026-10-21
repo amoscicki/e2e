@@ -6,7 +6,8 @@
  * code outside the grammar runs nothing. A Secret fills only under the
  * authorization `type_secret` runs, reads and matchers see redacted text, a
  * locator found by part of a text is refused in a project with secrets, a
- * password field stays unreadable, and the pixel taint follows a fill.
+ * password field stays unreadable, and the pixel taint follows a fill. The
+ * statements that pass join `test_lines`.
  */
 
 import path from 'node:path';
@@ -58,6 +59,11 @@ describe('e2e mcp try_lines', { timeout: 120_000 }, () => {
 
   const call = (tool: string, args: Record<string, unknown> = {}): Promise<ToolText> => invoke('call', { tool, args });
   const tryLines = (code: string, timeout?: number): Promise<ToolText> => call('try_lines', { code, ...(timeout === undefined ? {} : { timeout }) });
+  const nodeId = (text: string, pattern: RegExp): string => {
+    const match = /#(n\d+)/.exec(text.split('\n').find((line) => pattern.test(line)) ?? '');
+    if (match === null) throw new Error(`no node matches ${pattern} in:\n${text}`);
+    return match[1]!;
+  };
 
   beforeAll(async () => {
     app = await startFixtureApp();
@@ -139,6 +145,27 @@ await screen.getByRole('button', 'Increment').tap();`,
     );
     const unchanged = await tryLines("await expect(screen.getByRole('status', 'Counter')).toHaveText('2')", 300);
     expect(unchanged.isError, unchanged.text).toBe(false);
+  });
+
+  it('adds the statements that passed to test_lines, reads and failures aside, and keeps the ids its screen listed', async () => {
+    const drafted = await call('test_lines');
+    expect(drafted.text.split('\n').filter((line) => line.startsWith('await '))).toEqual([
+      'await app.open();',
+      "await app.open('/');",
+      "await screen.getByRole('button', 'Increment').tap();",
+      "await expect(screen.getByRole('status', 'Counter')).toHaveText('1');",
+      "await screen.getByLabel('Plan').selectOption('Pro');",
+      "await expect(screen.getByLabel('Plan')).toHaveValue('pro');",
+      "await expect(screen.getByText('Late arrival')).toBeVisible();",
+      "await screen.getByRole('button', 'Increment').tap();",
+      "await expect(screen.getByRole('status', 'Counter')).toHaveText('2');",
+    ]);
+    // The next action's test line is read from the screen try_lines returned.
+    const echo = await tryLines("await app.open('/echo');");
+    const typed = await call('type', { target: nodeId(echo.text, /textbox "Token"/), value: 'typed by id' });
+    expect(typed.text.split('\n')[1]).toBe('Test line: await screen.getByRole("textbox", "Token").fill("typed by id");');
+    const home = await tryLines("await app.open('/');");
+    expect(home.isError, home.text).toBe(false);
   });
 
   describe('secrets', () => {

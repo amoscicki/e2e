@@ -130,10 +130,11 @@ screen.
    app source, or a live session.
 4. For a screen the evidence and the source leave out, look live (topic
    `mcp`): open or reuse a session, go straight to that screen, then
-   `observe` and `locate`. On the web, `navigate` to the path of the `❯ at`
-   URL or the screen's route, and tap only to reach a state no URL opens. A
-   device session starts on the app's launch screen: take the shortest path
-   from there.
+   `observe` and `locate`, or `try_lines` for the fixed line and the ones
+   after it. On the web, `navigate` to the path of the `❯ at` URL or the
+   screen's route, and tap only to reach a state no URL opens. A device
+   session starts on the app's launch screen: take the shortest path from
+   there.
 5. Rerun the file (topic `mcp` says when a session must close first).
    Repeat with the next failure.
 
