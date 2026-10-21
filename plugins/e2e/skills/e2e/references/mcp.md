@@ -131,10 +131,9 @@ Resources: `e2e://guide` and `e2e://guide/<topic>` hold this skill.
 
 ## Fixing a failing test
 
-When a test fails, rerun it in a session until it passes. Don't walk the
-flow again from the start over `call`, and don't rerun it with
-`npx e2e run` once per fix. A session runs the test and stops where it
-failed:
+When a run's evidence leaves out a screen the fix needs (topic
+`debugging`), don't walk the flow again from the start over `call`. A
+session runs the test and stops where it failed:
 
 1. `open_session {test: "tests/<feature>.e2e.ts:<line>"}`, with the line the
    test is declared on, or the file alone when it holds one test. The test
@@ -149,9 +148,9 @@ failed:
    missing step. Then carry on from there: act out the test's next lines
    with `call`, and `locate` each locator before you get to it, so the rerun
    finds no second mistake. Edit the test file.
-4. `close_session`, then `open_session {test}` again. The session loads the
-   config and the test files fresh, so it runs the edited test from the
-   start. Repeat until it passes; the session then sits on the final screen.
+4. To rerun, `close_session`, then `open_session {test}` again. The session
+   loads the config and the test files fresh, so it runs the edited test
+   from the start and stops on the next failure, or on the final screen.
 5. `close_session`, then confirm once with `npx e2e run <file>`.
 
 - `afterEach` hooks and fixture teardown wait for `close_session`; a failure
