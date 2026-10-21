@@ -116,7 +116,7 @@ Resources: `e2e://guide` and `e2e://guide/<topic>` hold this skill.
    text, so match it with `getByRole('status').filter({ hasText: 'Saved.' })`
    or `getByText`.
 3. Try each line no action printed before you write it, such as an
-   assertion or a line you changed:
+   assertion or a step you didn't walk:
    `call {tool: "try_lines", args: {code: "await screen.getByLabel('Email').fill('ada@example.com');\nawait expect(screen.getByRole('status')).toHaveText('Saved');"}}`.
    The statements that pass, except reads, join `test_lines` in the order
    they ran, so the draft holds the whole flow. When one fails, fix it from
@@ -127,8 +127,9 @@ Resources: `e2e://guide` and `e2e://guide/<topic>` hold this skill.
    tried; write them from the screen, whose header names the current path.
    In a project with credentials or secrets, `try_lines` refuses a locator
    found by part of a text, `filter({ hasText })` included: try the exact
-   text (`getByText('Saved.')`) instead. Raise `timeout` for a slow first
-   `app.open`.
+   text instead, `getByText('Saved.')`, or
+   `filter({ has: screen.getByText('Offer B') })` to pick a row. Raise
+   `timeout` for a slow first `app.open`.
 4. Write `tests/<feature>.e2e.ts` (topic `writing-tests`). Deterministic steps
    where you saw exact names; `agent.act` where the flow varies.
 5. Run it from the shell: `npx e2e run tests/<feature>.e2e.ts`. On a

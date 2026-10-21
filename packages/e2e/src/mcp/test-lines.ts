@@ -196,7 +196,7 @@ export class SessionTestLines {
   tool(): ToolSet[string] {
     return {
       description:
-        "Every test line this session's actions printed so far, in order, as a draft test body: the screen.* and app.* calls that repeat each action, with a comment where an action has none, and the statements try_lines passed, as written. Paste it into a test, then add the assertions.",
+        "Every test line this session's actions printed so far, in order, as a draft test body: the screen.* and app.* calls that repeat each action, with a comment where an action has none, and the statements try_lines passed, as written. Paste it into a test, then add any assertion it lacks.",
       inputSchema: z.object({}).strict(),
       execute: async () => this.draft(),
     };

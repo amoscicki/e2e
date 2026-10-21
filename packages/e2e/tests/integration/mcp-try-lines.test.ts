@@ -262,6 +262,13 @@ await expect(screen.getByTestId('plain')).toHaveText('nothing yet');`, 300);
       expect(still.text).toContain('returned "<secret:apiKey>"');
     });
 
+    it('drafts the tried secret fills in test_lines by name', async () => {
+      const drafted = await call('test_lines');
+      expect(drafted.text).toContain("\nawait screen.getByLabel('Password').fill(credentials.user('admin').password);\n");
+      expect(drafted.text).toContain("\nawait screen.getByLabel('Token').fill(secrets.get('apiKey'));\n");
+      expect(drafted.text).toContain("Import credentials and secrets from 'e2e'.");
+    });
+
     it('never returns a secret value', () => {
       for (const text of returned) {
         expect(text).not.toContain(PASSWORD);

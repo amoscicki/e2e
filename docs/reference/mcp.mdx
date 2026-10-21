@@ -231,8 +231,8 @@ Returns how many nodes match a semantic locator, which ones, and the
 #### `try_lines`
 
 Runs test statements on the live session and returns each one's pass or
-failure, a read's value, and what changed on screen. Try a step's lines,
-then paste the ones that pass into the test.
+failure, a read's value, and what changed on screen. Try a line here before
+you write it into a test.
 
 ```txt
 call {tool: "try_lines", args: {code: "await screen.getByLabel('Email').fill('ada@example.com');\nawait expect(screen.getByRole('status')).toHaveText('Saved');"}}
