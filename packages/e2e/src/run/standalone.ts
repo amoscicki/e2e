@@ -89,7 +89,9 @@ export async function openStandaloneAttempt(options: StandaloneAttemptOptions): 
     const attempt = await host.openAttempt(options);
     const close = async (): Promise<readonly SerializedError[]> => {
       const torn = (await attempt.test?.teardown()) ?? [];
-      return [...torn, ...(await host.close())];
+      // A test's `beforeAll` failure is a run error too, and was its outcome when the session opened.
+      const closed = (await host.close()).filter((error) => attempt.test === undefined || error.phase !== 'beforeAll');
+      return [...torn, ...closed];
     };
     return { ...attempt, close };
   } catch (cause) {

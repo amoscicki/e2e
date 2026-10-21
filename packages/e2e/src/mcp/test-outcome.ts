@@ -80,5 +80,5 @@ function nextSteps(test: StandaloneTest, outcome: StandaloneTestOutcome): string
   // A file that declares one test names it whatever lines an edit adds above it.
   const alone = test.file.tests.filter((each) => each.kind === 'test').length === 1;
   const rerun = alone ? test.pair.test.file : testLocation(test.pair.test);
-  return `The session is on the screen where the test stopped, shown below: observe and locate from here, then fix the test file. ${teardown} To run the fixed test from the start, close_session, then open_session {test: "${rerun}"}.`;
+  return `The session is on the screen where the test stopped, shown below: observe and locate from here, and act out the test's next lines to check them too, then fix the test file. ${teardown} To run the fixed test from the start, close_session, then open_session {test: "${rerun}"}.`;
 }

@@ -46,7 +46,8 @@ Or declare it in the client's project config (`.mcp.json` for Claude Code,
 Sessions run on the project's config (`e2e.config.ts`, `.mts`, `.js`, or `.mjs`):
 in a project without one, `open_session` fails with `CONFIG_NOT_FOUND`, so
 set it up first (topic `setup`). No model is needed: without the optional `ai` package, sessions
-open and the deterministic tools work.
+open and the deterministic tools work. A test a session runs needs one only for
+an agent step with no recording.
 
 Flags: `--config <path>` names the default config file, `--target <name>`
 fixes the target every session opens on, `--headed` shows the browser or
@@ -130,8 +131,9 @@ Resources: `e2e://guide` and `e2e://guide/<topic>` hold this skill.
 
 ## Fixing a failing test
 
-When a test fails, don't walk the flow again from the start over `call`.
-Let a session run the test and stop where it failed:
+When a test fails, don't walk the flow again from the start over `call`,
+and don't rerun it once per fix. Let a session run the test and stop where
+it failed:
 
 1. `open_session {test: "tests/<feature>.e2e.ts:<line>"}`, with the line the
    test is declared on, or the file alone when it holds one test. The test
@@ -143,7 +145,9 @@ Let a session run the test and stop where it failed:
    screen nearest a locator that matched nothing, and the steps that ran.
    The screen below it is the live screen where the test stopped.
 3. `observe` and `locate` on that screen to find the right name or the
-   missing step. Edit the test file.
+   missing step. Then carry on from there: act out the test's next lines
+   with `call`, and `locate` each locator before you get to it, so the rerun
+   finds no second mistake. Edit the test file.
 4. `close_session`, then `open_session {test}` again. The session loads the
    config and the test files fresh, so it runs the edited test from the
    start. Repeat until it passes; the session then sits on the final screen.

@@ -34,7 +34,9 @@ import { WorkerModels } from './worker-models.ts';
  * Who drives the attempt. A hosted attempt is a test in another runner: it
  * publishes itself for `expect.soft` and `expect.poll`, enforces its deadline,
  * and writes a trace under `results/host/`. A one-shot attempt is `e2e mcp`'s
- * live session: no test body, no publication, artifacts under `results/mcp/`.
+ * live session, with artifacts under `results/mcp/`: no test body unless the
+ * session runs one (`StandaloneSessionOptions.test`), which publishes itself
+ * only while its code runs.
  */
 export type AttemptKind = 'hosted' | 'one-shot';
 
@@ -180,7 +182,9 @@ export async function launchAttempt(
   // Launch was the worker's work; the test's deadline starts once its fixtures exist.
   budget.enter(attemptSignal, options.timeoutMs);
   const attempt: ExecutorAttempt = { testId: identity.testId, attemptId, index: 0, signal: end.signal, memory: new Map<string, unknown>() };
-  // A test's agent steps replay and record as on a run's first attempt.
+  // A test's agent steps replay and record as on a run's first attempt, and
+  // its screenshots count as written by a run of their own: a baseline one
+  // session wrote is compared against in the next, as the next run would.
   const cache = test === undefined
     ? undefined
     : createAgentCacheContext({
@@ -196,7 +200,7 @@ export async function launchAttempt(
       ...(cache === undefined ? {} : { cache }),
       ...(test === undefined
         ? {}
-        : { test: { file: test.pair.test.file, titlePath: test.pair.test.titlePath, writtenScreenshots: new WrittenScreenshots(worker.resultsDir) } }),
+        : { test: { file: test.pair.test.file, titlePath: test.pair.test.titlePath, writtenScreenshots: new WrittenScreenshots(artifacts.dir) } }),
     });
   } catch (cause) {
     end.abort();

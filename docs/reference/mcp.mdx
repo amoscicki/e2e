@@ -384,7 +384,9 @@ them. A listed release on another version than the project's e2e can reject
 config keys it does not know; the registration above always matches.
 
 The server needs no model: a project without the optional `ai` package
-opens sessions and drives the app with the deterministic tools.
+opens sessions and drives the app with the deterministic tools. A test a
+session [runs](#running-a-test) calls the configured model for an agent step
+the replay cache cannot serve.
 
 Start the server in the project directory. Config discovery works like
 `e2e run`. For another config, see [`--config`](#config) and
@@ -395,12 +397,15 @@ Start the server in the project directory. Config discovery works like
 - Operator output goes to stderr, prefixed `e2e mcp:`. Stdout carries only
   the protocol.
 - What your code writes through `console`, `process.stdout`, or
-  `process.stderr` (the config's top-level code, project tools) goes to
-  stderr with secret values redacted.
+  `process.stderr` (the config's top-level code, project tools, a test a
+  session runs) goes to stderr with secret values redacted.
 - Output printed while a config loads appears once it has loaded. If the
   load fails, that output is withheld, since the config's secrets are
   unknown.
-- An error nobody caught is logged redacted and shuts the server down.
+- A promise a session's test leaves rejected fails that test, as in a run.
+  One that rejects after the test's body ended is an `UNHANDLED_REJECTION`
+  line in `close_session`'s result. Any other error nobody caught is logged
+  redacted and shuts the server down.
 
 <Note>
 A child process that inherits the server's stdio writes past this.
@@ -479,9 +484,14 @@ open_session {test: "tests/checkout.e2e.ts:12"}
 - **Not part of it.** No test result, report, or trace page. Retries, and the
   test's `trace` and `video` modes, don't apply. The failure screenshot and
   `screen-at-failure.txt` land in the session's artifacts directory.
-- Test code in two sessions takes turns: one session runs its test or its
-  teardown at a time, since `expect.poll`, `expect.soft`, and `test.skip`
-  find the running test through one slot per process.
+- **Screenshots.** Each session counts as a run of its own for
+  `toHaveScreenshot`: a baseline one session writes is compared against in
+  the next.
+- **Several sessions.** Test code in two sessions takes turns: one session
+  runs its test or its teardown at a time, since `expect.poll`,
+  `expect.soft`, and `test.skip` find the running test through one slot per
+  process. An open cancelled while its test waits for its turn runs none of
+  the test's code.
 
 | Throws | When |
 | --- | --- |

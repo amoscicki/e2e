@@ -8,10 +8,12 @@
  */
 
 import { Writable } from 'node:stream';
+import { isAbandonedRejection } from '../internal/abandoned.ts';
 import { errorMessage, exitCodeForCategory, classifyError } from '../internal/errors.ts';
 import { McpOutput } from '../mcp/output.ts';
 import { serveMcp, type ServeOptions } from '../mcp/server.ts';
 import { processSecrets } from '../run/secrecy.ts';
+import { claimStrayRejection } from '../run/standalone-test.ts';
 import { mcpSessionEvent } from '../telemetry/events.ts';
 import type { Telemetry } from '../telemetry/telemetry.ts';
 
@@ -95,9 +97,15 @@ export async function mcp(version: string, options: McpCommandOptions, telemetry
     output.report(`e2e mcp: [error] uncaught: ${text}`);
     stop.abort();
   };
+  // A rejection nobody handled fails the test a session runs when one can be
+  // charged with it, as in a run's worker, and is otherwise uncaught.
+  const onRejection = (cause: unknown): void => {
+    if (isAbandonedRejection(cause) || claimStrayRejection(cause)) return;
+    onUncaught(cause);
+  };
   process.once('SIGINT', onSignal);
   process.once('SIGTERM', onSignal);
-  // A rejection nobody handled arrives here too: with no `unhandledRejection` listener, Node raises it as uncaught.
+  process.on('unhandledRejection', onRejection);
   process.on('uncaughtException', onUncaught);
   try {
     const code = await serveMcp({
@@ -124,6 +132,7 @@ export async function mcp(version: string, options: McpCommandOptions, telemetry
     output.end();
     process.off('SIGINT', onSignal);
     process.off('SIGTERM', onSignal);
+    process.off('unhandledRejection', onRejection);
     process.off('uncaughtException', onUncaught);
   }
 }

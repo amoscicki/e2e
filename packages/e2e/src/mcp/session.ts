@@ -417,20 +417,31 @@ export class SessionHost {
   }
 
   /**
-   * Opens the app URL when `open` asks and the engine can navigate, then
    * observes; a device's pinned app launched before the step opened. Either
    * opening is the test's `app.open()`, the session's first test line.
+   * Without `open` the screen is the one a test left, and a test that failed
+   * before it opened the app left none. The test's own lines are in its
+   * file, so the session's first line is the agent's first action. The
+   * observation goes through the catalog's context, which keeps it for that
+   * action's line.
    */
   private async firstScreen(live: LiveSession, open: boolean): Promise<string> {
+    if (!open) {
+      try {
+        return live.screen.initial(await live.step.run(() => live.catalog.context.observe()));
+      } catch (cause) {
+        return `No screen to show: ${errorMessage(cause)}`;
+      }
+    }
     const base = live.target.app.base?.href;
-    if (open && base !== undefined && live.step.context.target.verbs.has('navigate')) {
+    if (base !== undefined && live.step.context.target.verbs.has('navigate')) {
       try {
         await live.step.run((context) => context.actions.navigate(base));
       } catch (cause) {
         return `Opening ${base} failed: ${errorMessage(cause)}\nUse navigate once the app is reachable.`;
       }
       live.catalog.lines.opened();
-    } else if (open && launchesPinnedApp(live.target)) {
+    } else if (launchesPinnedApp(live.target)) {
       live.catalog.lines.opened();
     }
     const observation = await live.step.run(() => live.catalog.context.observe());

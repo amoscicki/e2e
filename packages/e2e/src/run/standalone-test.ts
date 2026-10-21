@@ -18,9 +18,11 @@ import type { OperationContext, TargetSession } from '../engine/surface.ts';
 import { publishAttempt } from '../expect/attempt.ts';
 import { PollScope, runInPollScope } from '../expect/poll-scope.ts';
 import { SoftFailures } from '../expect/soft.ts';
-import { classifyError, ConfigurationError, E2EError, serializeError, TestTimeoutError, type ErrorPhase, type SerializedError } from '../internal/errors.ts';
+import {
+  classifyError, ConfigurationError, E2EError, InfrastructureError, serializeError, TestError, TestTimeoutError, type ErrorPhase, type SerializedError,
+} from '../internal/errors.ts';
 import { isRuntimeSkip, type RuntimeSkip } from '../internal/skip.ts';
-import { withTimeout, type Deadline } from '../internal/time.ts';
+import { withAbort, withTimeout, type Deadline } from '../internal/time.ts';
 import type { SetupFn } from '../types.ts';
 import type { AttemptBudget } from './budget.ts';
 import { classifyAttemptStatus, type TargetExecutor } from './execute.ts';
@@ -31,6 +33,26 @@ import { findRegistered, runHook, type Realm } from './realm.ts';
 import type { FailureEvidence } from './records.ts';
 import { sessionSecrecy } from './secrecy.ts';
 import type { StepRecord, StepRecorder } from './steps.ts';
+
+/** A queue: each piece of work starts once every piece queued before it has settled. */
+function oneAtATime(): <T>(work: () => Promise<T>) => Promise<T> {
+  let tail: Promise<unknown> = Promise.resolve();
+  return (work) => {
+    const turn = tail.then(work, work);
+    tail = turn.catch(() => undefined);
+    return turn;
+  };
+}
+
+/**
+ * Test code runs one turn at a time per process, a run's hooks and body or
+ * its teardown: `expect.poll`, `expect.soft`, and `test.skip` find the running
+ * attempt through one slot per process (`publishAttempt`), and a rejection
+ * nobody handled is charged to the turn it lands in.
+ */
+const takeTurn = oneAtATime();
+/** Collection takes one slot per process too (`collectModule`), and a file's top-level await can yield it. */
+const collectAlone = oneAtATime();
 
 /** The test `open_session {test}` runs, as `e2e run`'s collection and selection found it on the session's target. */
 export interface StandaloneTest {
@@ -58,7 +80,7 @@ export async function selectStandaloneTest(
   positional: string,
   graph: string | undefined,
 ): Promise<StandaloneTest> {
-  const collection = await collect(config, [positional], graph);
+  const collection = await collectAlone(() => collect(config, [positional], graph));
   const { pairs } = select(collection, config, { targetIds: [target.name] }, { noTestsHint: 'name a test file the config finds, with :line for one test in it' });
   // A serial group's other members run beside a selected one; only what the positional named counts.
   const runnable = pairs.filter((pair) => pair.disposition === 'run' && pair.test.kind === 'test' && pair.test.selected);
@@ -153,26 +175,47 @@ interface Started {
   readonly teardowns: readonly { readonly label: string; readonly run: () => Promise<void> | void }[];
 }
 
-/**
- * The tail of the chain every standalone test run and teardown takes its turn
- * on. `expect.poll`, `expect.soft`, and `test.skip` find the running attempt
- * through one slot per process (`publishAttempt`), so test code in two
- * sessions of one `e2e mcp` server takes turns rather than overlapping.
- */
-let turns: Promise<unknown> = Promise.resolve();
+/** Where a rejection nobody handled goes while test code takes its turn. */
+let strayInTurn: ((cause: unknown) => void) | undefined;
+/** The run whose turn ended last and whose teardown is still to come: a promise its test left can reject later. */
+let lastRun: { readonly late: (cause: unknown) => void } | undefined;
 
-/** Runs `work` once every turn queued before it has settled. */
-function takeTurn<T>(work: () => Promise<T>): Promise<T> {
-  const turn = turns.then(work, work);
-  turns = turn.catch(() => undefined);
-  return turn;
+/**
+ * Takes a rejection nobody in the process handled when a test a session ran
+ * can be charged with it, as a run's worker does: test code taking its turn
+ * fails with it, the way a body cut short by its timeout does, and between
+ * turns the run that ended last reports it at its close. False when no
+ * session's test is live, so the caller treats it as any uncaught error.
+ */
+export function claimStrayRejection(cause: unknown): boolean {
+  if (strayInTurn !== undefined) {
+    strayInTurn(cause);
+    return true;
+  }
+  if (lastRun === undefined) return false;
+  lastRun.late(cause);
+  return true;
 }
 
 /** Binds one test to an attempt; nothing runs until `run`. */
 export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: StandaloneTest): StandaloneTestRun {
   const { config, executor, steps, budget, attemptId } = env;
   let ran: Promise<Started | undefined> | undefined;
+  /** Whether the run's turn came; a teardown before then leaves nothing to tear down. */
+  let begun = false;
   let tearingDown: Promise<readonly SerializedError[]> | undefined;
+  /** What a promise the test left rejected with after its turn ended. */
+  const lateErrors: SerializedError[] = [];
+  const self = {
+    late: (cause: unknown): void => {
+      const error = new TestError(
+        'UNHANDLED_REJECTION',
+        `a promise rejected after the test's body ended, most likely left by "${test.pair.test.titlePath.join(' › ')}": ${classifyError(cause).message}`,
+        { cause },
+      );
+      lateErrors.push(serialize(error, 'body'));
+    },
+  };
   const serialize = (cause: unknown, phase: ErrorPhase): SerializedError =>
     serializeError(classifyError(cause), { phase, projectRoot: config.projectRoot, redact: env.redact });
   const operation = (signal: AbortSignal, timeoutMs: number): OperationContext => ({ signal, timeoutMs, runId: env.runId, attemptId, origin: 'test' });
@@ -203,6 +246,11 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
       failure = classified;
       failurePhase = phase;
     };
+    let phase: RunPhase = 'beforeAll';
+    /** Ends the body the way its timeout does, while the body's race is pending. */
+    let cutBody: ((cause: unknown) => void) | undefined;
+    // A rejection nobody handled is charged to this turn, as a run's worker charges the attempt in flight.
+    strayInTurn = (cause) => (cutBody === undefined ? fail(cause, phase) : cutBody(cause));
 
     const hookFailure = await executor.realms.enterScopes(realm, registered);
     let extended: ExtendedFixtures | undefined;
@@ -219,7 +267,6 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
       try {
         extended = createExtendedFixtures(registered.fixtures, env.fixtures, env.target.engine?.name ?? 'none', budget.signal);
         const fixtures = extended;
-        let phase: RunPhase = 'beforeEach';
         const enter = (next: RunPhase): void => {
           phase = next;
           steps.phase = next === 'beforeEach' ? 'beforeEach' : undefined;
@@ -257,8 +304,17 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
           const softFailure = soft.close();
           if (softFailure !== undefined) throw softFailure;
         };
+        const body = Promise.race([
+          runInPollScope(polls, mainWork),
+          new Promise<never>((_, reject) => {
+            cutBody = (cause) => {
+              bodyAbort.abort();
+              reject(cause);
+            };
+          }),
+        ]);
         try {
-          await withTimeout(runInPollScope(polls, mainWork), Math.max(1, pair.options.timeout), () => {
+          await withTimeout(body, Math.max(1, pair.options.timeout), () => {
             timedOut = true;
             bodyAbort.abort();
             return new TestTimeoutError(`test timed out after ${pair.options.timeout} ms in phase ${phase}`);
@@ -267,6 +323,8 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
           polls.close();
           if (isRuntimeSkip(cause)) skipped = cause;
           else fail(cause, phase);
+        } finally {
+          cutBody = undefined;
         }
         // A rejection the body left unawaited lands once the microtasks drain.
         await new Promise<void>((resolve) => setImmediate(resolve));
@@ -334,25 +392,37 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
 
   const run = (): Promise<StandaloneTestOutcome> => {
     if (ran !== undefined) return Promise.reject(new ConfigurationError('WORKER_PROTOCOL', 'the session already ran its test'));
-    if (tearingDown !== undefined) return Promise.reject(new ConfigurationError('NO_SESSION', 'the session closed before its test ran'));
-    const executed = takeTurn(execute);
+    const executed = takeTurn(async () => {
+      // A session closed or cancelled while it waited for its turn runs none of the test's code.
+      if (tearingDown !== undefined || env.signal.aborted) throw new InfrastructureError('CANCELLED', 'the session ended before its test ran');
+      begun = true;
+      try {
+        const result = await execute();
+        if (result.started !== undefined) lastRun = self;
+        return result;
+      } finally {
+        strayInTurn = undefined;
+      }
+    });
     ran = executed.then((result) => result.started, () => undefined);
-    return executed.then((result) => result.outcome);
+    return withAbort(executed.then((result) => result.outcome), env.signal, () => new InfrastructureError('CANCELLED', 'the session was cancelled while its test ran'));
   };
 
   const teardown = (): Promise<readonly SerializedError[]> => {
     tearingDown ??= (async () => {
+      if (!begun) return [];
       const started = await ran;
-      if (started === undefined) return [];
+      if (started === undefined) return lateErrors;
       return takeTurn(async () => {
         const errors: SerializedError[] = [];
+        strayInTurn = (cause) => errors.push(serialize(cause, 'afterEach'));
         const soft = new SoftFailures();
         // As after a run's body: a soft matcher in a teardown hook finds the collection closed.
         soft.close();
         const publication = new AbortController();
-        publishAttempt({ attemptId, owner: 'host', testKind: 'test', assertionTimeout: config.assertionTimeout, budget, soft, polls: new PollScope('the test teardown') }, publication.signal);
-        steps.phase = 'afterEach';
         try {
+          publishAttempt({ attemptId, owner: 'host', testKind: 'test', assertionTimeout: config.assertionTimeout, budget, soft, polls: new PollScope('the test teardown') }, publication.signal);
+          steps.phase = 'afterEach';
           // Each teardown gets its own cleanup budget, as in a run's attempt.
           for (const hook of started.teardowns) {
             const hookAbort = budget.enter(env.signal, config.cleanupTimeout);
@@ -363,13 +433,15 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
             }
           }
           await executor.settleAttempt(env.session, attemptId).catch((cause: unknown) => errors.push(serialize(cause, 'afterEach')));
+          await executor.realms.leave(started.realm).catch((cause: unknown) => errors.push(serialize(cause, 'afterAll')));
         } finally {
           steps.phase = undefined;
           publication.abort();
+          strayInTurn = undefined;
+          if (lastRun === self) lastRun = undefined;
         }
-        await executor.realms.leave(started.realm).catch((cause: unknown) => errors.push(serialize(cause, 'afterAll')));
-        return errors;
-      }).catch((cause: unknown) => [serialize(cause, 'cleanup')]);
+        return [...lateErrors, ...errors];
+      }).catch((cause: unknown) => [...lateErrors, serialize(cause, 'cleanup')]);
     })();
     return tearingDown;
   };
