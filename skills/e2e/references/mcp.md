@@ -130,7 +130,8 @@ Resources: `e2e://guide` and `e2e://guide/<topic>` hold this skill.
    `debugging`), then rerun. To see a screen the evidence leaves out, go
    straight to it instead of walking the flow again from the start: on the
    web, `navigate` to its path; on a device, the shortest path from the
-   launch screen. Then `observe` and `locate`.
+   launch screen. Then `observe` and `locate`, or try the fixed line with
+   `try_lines`.
 6. `close_session` when you are done; an idle session closes on its own after
    30 minutes and never outlives 4 hours. When the client exits, every session
    closes and the app commands stop. To look at another project or config,
