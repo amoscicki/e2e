@@ -21,7 +21,12 @@ import { createFixtures } from './fixtures.ts';
 import { writeHostTrace } from './host-trace.ts';
 import type { AttemptRecord } from './records.ts';
 import { holdSecretRegistry } from '../secrets.ts';
+import { createAgentCacheContext } from '../cache/context.ts';
+import { storedRecordingsFor } from '../cache/rekeyed.ts';
+import { WrittenScreenshots } from './screenshots.ts';
 import { processSecrets, redactForSession, sessionSecrecy } from './secrecy.ts';
+import { targetIdentity } from './sessions.ts';
+import { createStandaloneTestRun, type StandaloneTest, type StandaloneTestRun } from './standalone-test.ts';
 import { StepRecorder, type StepProgress } from './steps.ts';
 import { WorkerModels } from './worker-models.ts';
 
@@ -41,6 +46,12 @@ export interface StandaloneSessionOptions {
   readonly onProgress?: (progress: StepProgress) => void;
   /** The test title of a hosted attempt; ignored by a one-shot attempt. */
   readonly name?: string;
+  /**
+   * The collected test a one-shot attempt runs (`open_session {test}`): the
+   * attempt takes its identity, agent context, and replay cache, and exposes
+   * the run as `test`.
+   */
+  readonly test?: StandaloneTest | undefined;
 }
 
 export interface StandaloneAttempt {
@@ -53,6 +64,8 @@ export interface StandaloneAttempt {
   readonly budget: AttemptBudget;
   readonly artifactsDir: string;
   readonly tracePath: string;
+  /** The test the attempt runs, when its options named one. */
+  readonly test: StandaloneTestRun | undefined;
   report(): Report | undefined;
   close(): Promise<readonly SerializedError[]>;
 }
@@ -131,7 +144,8 @@ export async function launchAttempt(
   let session: TargetSession | undefined;
   const redact = (text: string): string => redactForSession(session, config.allSecrets, text);
   const agent = options.agent ?? config.agentNames[0] ?? '';
-  const identity = attemptIdentity(worker, attemptId, agent, redact(options.name ?? target.name));
+  const test = worker.kind === 'one-shot' ? options.test : undefined;
+  const identity = attemptIdentity(worker, attemptId, agent, redact(options.name ?? target.name), test?.pair.test.id);
   const steps = new StepRecorder(attemptId, {
     maxEventsPerStep: config.limits.maxEventsPerStep, projectRoot: config.projectRoot, redact, signal: attemptSignal,
     ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }),
@@ -166,12 +180,23 @@ export async function launchAttempt(
   // Launch was the worker's work; the test's deadline starts once its fixtures exist.
   budget.enter(attemptSignal, options.timeoutMs);
   const attempt: ExecutorAttempt = { testId: identity.testId, attemptId, index: 0, signal: end.signal, memory: new Map<string, unknown>() };
+  // A test's agent steps replay and record as on a run's first attempt.
+  const cache = test === undefined
+    ? undefined
+    : createAgentCacheContext({
+      cache: config.cache, projectRoot: config.projectRoot, projectId: config.projectId, testId: test.pair.test.id,
+      target: targetIdentity(target), attemptIndex: 0, recordings: storedRecordingsFor(config.cache),
+    });
   let acquired: ReturnType<typeof createFixtures>;
   try {
     acquired = createFixtures({
       config, target, session: opened, steps, budget, runId, attemptId, attempt, artifacts: artifacts.sink,
-      priorSteps: () => steps.completed(), agent: options.agent, agentContext: undefined, saveSession: undefined,
+      priorSteps: () => steps.completed(), agent: options.agent, agentContext: test?.pair.options.agentContext, saveSession: undefined,
       models: new WorkerModels((error) => recordFailure(error, 'body')), debug: worker.debug,
+      ...(cache === undefined ? {} : { cache }),
+      ...(test === undefined
+        ? {}
+        : { test: { file: test.pair.test.file, titlePath: test.pair.test.titlePath, writtenScreenshots: new WrittenScreenshots(worker.resultsDir) } }),
     });
   } catch (cause) {
     end.abort();
@@ -245,9 +270,15 @@ export async function launchAttempt(
     })();
     return ending;
   };
+  const testRun = test === undefined
+    ? undefined
+    : createStandaloneTestRun({
+      config, target, executor, runId, attemptId, session: opened, steps, budget, fixtures: acquired.fixtures,
+      artifacts: artifacts.sink, cache, signal: attemptSignal, deadline, redact,
+    }, test);
   return {
     runId, attemptId, fixtures: acquired.fixtures, agentRuntime: acquired.agentRuntime, session: opened, steps, budget,
-    artifactsDir: artifacts.dir, tracePath, close,
+    artifactsDir: artifacts.dir, tracePath, test: testRun, close,
     report: () => report && structuredClone(report),
   };
 }
@@ -263,11 +294,11 @@ interface AttemptIdentity {
  * covers the unique attempt id, so repeated names never share a directory,
  * and the title slug is dropped while a provider's values are unknown, since
  * no caller text can then be vouched for as a path. A one-shot attempt keeps
- * `mcp/<target>-<attemptId>`.
+ * `mcp/<target>-<attemptId>`, and the id of the test it runs, if any.
  */
-function attemptIdentity(worker: AttemptWorker, attemptId: string, agent: string, redactedName: string): AttemptIdentity {
+function attemptIdentity(worker: AttemptWorker, attemptId: string, agent: string, redactedName: string, runsTest: string | undefined): AttemptIdentity {
   const { kind, target, config } = worker;
-  if (kind === 'one-shot') return { testId: `session:${target.name}`, segments: ['mcp', `${target.name}-${attemptId}`] };
+  if (kind === 'one-shot') return { testId: runsTest ?? `session:${target.name}`, segments: ['mcp', `${target.name}-${attemptId}`] };
   const testId = `host:${attemptId}`;
   const providerSecrets = [...config.allSecrets.values()].some((secret) => typeof secret.value === 'function');
   const title = providerSecrets ? 'session' : processSecrets.redact(redactedName);

@@ -2,14 +2,16 @@
 
 `e2e mcp` serves a project's live app to a coding agent over MCP (stdio). The
 coding agent drives the app the way the testing agent does: look at a screen
-before writing a test, check a locator before committing to it. Running tests
-and reading a failed run stay on the CLI (topics `running` and `debugging`).
+before writing a test, check a locator before committing to it. Running a
+suite stays on the CLI (topics `running` and `debugging`); to fix one failing
+test, a session can run it and stop on the screen where it failed.
 
 ## Contents
 
 - Setup
 - Tools
 - Workflow
+- Fixing a failing test
 - Rules
 
 ## Setup
@@ -61,7 +63,7 @@ tool with the same name, use the `e2e` server's.
 
 | Tool | Does |
 | --- | --- |
-| `open_session` | Loads the config (`config` names another file; default the nearest `e2e.config.ts`), starts the declared app command if any, boots the engine, opens the app (its URL, or launches a device's pinned app; it installs no build, so a local device needs `app.bundleId`), and returns the session id, the catalog, and the first observation. `target` is required when the config declares several. `headed: true` shows the browser or simulator when the user wants to watch; without it the session follows the server's `--headed`, headless by default. Each session has its own browser or device. |
+| `open_session` | Loads the config (`config` names another file; default the nearest `e2e.config.ts`), starts the declared app command if any, boots the engine, opens the app (its URL, or launches a device's pinned app; it installs no build, so a local device needs `app.bundleId`), and returns the session id, the catalog, and the first observation. `target` is required when the config declares several. `headed: true` shows the browser or simulator when the user wants to watch; without it the session follows the server's `--headed`, headless by default. `test` runs one test first and leaves the session on the screen where it stopped (see Fixing a failing test). Each session has its own browser or device. |
 | `tools` | The catalog: one line per tool with its argument names (`?` marks optional), the first sentence of its description, and `[read-only]` where it changes nothing. `tools {tool}` shows the full description and the JSON Schema of its arguments. |
 | `call` | Runs one catalog tool: `call {tool: "tap", args: {target: "n42"}}`. Arguments are checked against the tool's schema first; a wrong one fails with `INVALID_ARGUMENT` naming the field. |
 | `close_session` | Saves a recording still running, ends the attempt, disposes the engine, stops the app processes the session started once no other session uses them. |
@@ -126,6 +128,39 @@ Resources: `e2e://guide` and `e2e://guide/<topic>` hold this skill.
    closes and the app commands stop. To look at another project or config,
    `open_session {config: "path/to/e2e.config.ts"}`; no restart needed.
 
+## Fixing a failing test
+
+When a test fails, don't walk the flow again from the start over `call`.
+Let a session run the test and stop where it failed:
+
+1. `open_session {test: "tests/<feature>.e2e.ts:<line>"}`, with the line the
+   test is declared on, or the file alone when it holds one test. The test
+   runs the way `e2e run` runs it: `beforeAll` and `beforeEach` hooks,
+   `test.extend` fixtures, and the body, with the same locators, `expect`,
+   and timeouts.
+2. Read the text above the session summary: the outcome, the error code and
+   message, the failing line with the code around it, the URL, the nodes on
+   screen nearest a locator that matched nothing, and the steps that ran.
+   The screen below it is the live screen where the test stopped.
+3. `observe` and `locate` on that screen to find the right name or the
+   missing step. Edit the test file.
+4. `close_session`, then `open_session {test}` again. The session loads the
+   config and the test files fresh, so it runs the edited test from the
+   start. Repeat until it passes; the session then sits on the final screen.
+5. `close_session`, then confirm once with `npx e2e run <file>`.
+
+- `afterEach` hooks and fixture teardown wait for `close_session`; a failure
+  there shows as a `Cleanup (afterEach)` line in its result.
+- The replay cache treats the test as a run's first attempt: an `agent.act`
+  step recorded by `e2e run` or an earlier session replays, and a new one is
+  recorded once a later check passes.
+- The name follows `e2e run`'s positional rules and must select one test on
+  the session's target. Several fail with `TEST_AMBIGUOUS`, which lists them
+  as `file:line`; none fails with `NO_TESTS`.
+- `SESSION_TEST_UNSUPPORTED`: a test in a serial group, a test that starts
+  from a setup test's `session`, and a test that runs as several agents
+  can't run alone in a session. Fix those with `npx e2e run`.
+
 ## Rules
 
 - Record a demo or a bug for a pull request with `start_recording` once the
@@ -135,8 +170,9 @@ Resources: `e2e://guide` and `e2e://guide/<topic>` hold this skill.
 - A failed action is an error result that leads with the tool, its target,
   and the code (`tap #n9 failed: LOCATOR_NOT_FOUND: ...`) and still shows
   the screen it re-observed: re-aim from that screen.
-- Nothing a session does is recorded as a test or into the replay cache. A
-  session is for looking and trying; the test is what you write afterwards.
+- Nothing a session does is recorded as a test, and only a test it runs
+  (`open_session {test}`) reads or writes the replay cache. A session is for
+  looking and trying; the test is what you write afterwards.
 - A run from the shell and a live session share the app only if the target's
   app `command` sets `reuseExisting` (ignored in CI); otherwise close the
   session before running.
@@ -156,4 +192,5 @@ Resources: `e2e://guide` and `e2e://guide/<topic>` hold this skill.
   open on theirs, or close them first. `ENGINE_IN_USE`: the target's engine
   comes from a package every session shares; create it in the config or a
   file it imports by path. `UNKNOWN_TOOL`: the name is not in this session's
-  catalog; the message lists what is.
+  catalog; the message lists what is. `TEST_AMBIGUOUS` and
+  `SESSION_TEST_UNSUPPORTED`: see Fixing a failing test.

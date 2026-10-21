@@ -78,11 +78,20 @@ export function openStandaloneHost(options: StandaloneHostOptions): Promise<Stan
   return openWorker(options, 'hosted');
 }
 
-/** MCP's one attempt on a worker of its own, closed together. MCP keeps its own engine ownership. */
+/**
+ * MCP's one attempt on a worker of its own, closed together. MCP keeps its own
+ * engine ownership. The teardown of a test the attempt ran drives the app, so
+ * it runs before the host's close cancels the attempt's operations.
+ */
 export async function openStandaloneAttempt(options: StandaloneAttemptOptions): Promise<StandaloneAttempt> {
   const host = await openWorker(options, 'one-shot');
   try {
-    return { ...await host.openAttempt(options), close: host.close };
+    const attempt = await host.openAttempt(options);
+    const close = async (): Promise<readonly SerializedError[]> => {
+      const torn = (await attempt.test?.teardown()) ?? [];
+      return [...torn, ...(await host.close())];
+    };
+    return { ...attempt, close };
   } catch (cause) {
     await host.close();
     throw cause;
