@@ -2,7 +2,8 @@
 
 `e2e mcp` serves a project's live app to a coding agent over MCP (stdio). The
 coding agent drives the app the way the testing agent does: look at a screen
-before writing a test, check a locator before committing to it. Running tests
+before writing a test, check a locator or try a test line before committing
+to it. Running tests
 and reading a failed run stay on the CLI (topics `running` and `debugging`).
 
 ## Contents
@@ -74,6 +75,7 @@ The catalog, per session:
 | `tap`, `double_tap`, `long_press`, `right_click`, `hover`, `type`, `press`, `select`, `check`, `scroll`, `scroll_to`, `drag`, `upload`, `navigate`, `back`, `dismiss_keyboard` | The grammar verbs, as the testing agent gets them: `check` takes `checked`, `drag` a `to` node, `upload` project-relative `files`; `dismiss_keyboard` comes with device engines. On an engine that declares `tapModifiers`, `tap`, `double_tap`, and `right_click` take an optional `modifiers` list (`Shift`, `Control`, `Alt`, `Meta`, `ControlOrMeta`) to hold keys for the click. Each reports what changed on screen and, after its lead, the test line that repeats it (`Test line: await screen.getByRole("button", "Save").tap();`) or `No test line:` and why; `observe` shows the whole screen. A verb the engine cannot honor is not listed and fails with `UNSUPPORTED_CAPABILITY`. |
 | `type_secret` | Fills a configured secret by name: a credential's password into a password field, a `secrets` entry into any editable input; the plaintext never reaches the agent. Listed when the config declares `credentials` or `secrets` and the engine can fill secrets. |
 | `locate` | Tries a semantic locator with exactly one of `role`, `text`, `label`, `placeholder`, `testId` (`name` only with `role`; `exact` optional; anything else is `INVALID_ARGUMENT`) and returns how many nodes match, which, and the `screen.*` call to write. |
+| `try_lines` | Runs test statements (`code`, as a test body writes them) on the session's `screen`, `app`, and web `browser` with a test's waits, exactly-one rule, and matchers. Stops at the first failure and returns each statement's pass, failure (code and message), or read value, then what changed on screen. Each statement waits at most `timeout` ms (default 5000). The code is parsed, never run: statements start with `screen`, `app`, `browser`, or `expect(...)`; arguments are literals, regexes, arrays, objects, locators, and `credentials.user(name).username`. A secret (`credentials.user(name).password`, `secrets.get(name)`) goes only into `fill`, under `type_secret`'s checks. Anything else is `INVALID_ARGUMENT` naming the token and its line and column, and nothing runs. |
 | `test_lines` | Every test line the session's actions printed, in order, as a draft test body, starting with `await app.open();` for the session's own opening; an action without a line shows as a `//` comment. A line's locator matched the target alone on the live screen before the action (role and name first, test id last, narrowed to `{ visible: true }`, a container, or `.nth(i)` with a comment when twins share it); a fill names `credentials.user(name)` or `secrets.get(name)`, never a value; a navigation on the app's origin is written as its path. |
 | `screenshot` | The masked pixels as an image. |
 | `tap_at` | Taps a point (`x`, `y` in the latest screenshot's pixels): a listed control under it by id, otherwise the bare point, which an engine without a bare-point tap cannot do. Listed when the engine declares `tap` or a bare-point tap. |
@@ -113,15 +115,21 @@ Resources: `e2e://guide` and `e2e://guide/<topic>` hold this skill.
    `listitem` by its text: `status "Saved."` on an unlabelled status is its
    text, so match it with `getByRole('status').filter({ hasText: 'Saved.' })`
    or `getByText`.
-3. Write `tests/<feature>.e2e.ts` (topic `writing-tests`). Deterministic steps
+3. Try each step's lines before you write them:
+   `call {tool: "try_lines", args: {code: "await screen.getByLabel('Email').fill('ada@example.com');\nawait expect(screen.getByRole('status')).toHaveText('Saved');"}}`.
+   Paste the statements that passed into the test as they are. When one
+   fails, fix it from its code and message and the screen in the result,
+   then try only the fixed statement and the ones after it: the app is where
+   the passing statements left it, so starting over repeats their actions.
+4. Write `tests/<feature>.e2e.ts` (topic `writing-tests`). Deterministic steps
    where you saw exact names; `agent.act` where the flow varies.
-4. Run it from the shell: `npx e2e run tests/<feature>.e2e.ts`. On a
+5. Run it from the shell: `npx e2e run tests/<feature>.e2e.ts`. On a
    failure, fix from the terminal's failure block and the trace page (topic
    `debugging`), then rerun. To see a screen the evidence leaves out, go
    straight to it instead of walking the flow again from the start: on the
    web, `navigate` to its path; on a device, the shortest path from the
    launch screen. Then `observe` and `locate`.
-5. `close_session` when you are done; an idle session closes on its own after
+6. `close_session` when you are done; an idle session closes on its own after
    30 minutes and never outlives 4 hours. When the client exits, every session
    closes and the app commands stop. To look at another project or config,
    `open_session {config: "path/to/e2e.config.ts"}`; no restart needed.

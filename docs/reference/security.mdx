@@ -238,6 +238,9 @@ Redaction matches strings. These pass through:
   form holds the value stays collapsed and masked,
 - a value spread over several nodes, such as one character per cell on a PIN
   pad,
+- a yes or no about a value: an `e2e mcp` `locate` count or `try_lines`
+  matcher says whether the screen matches the text the agent passed, as an
+  assertion in a test does,
 - a case mapping that changes length (`ß` shown as `SS`), for the cut-text
   rule,
 - a value a secret provider returns, in titles, since titles are redacted

@@ -4,6 +4,7 @@
  * honors, `screenshot` and the point tools (`tap_at`, `hover_at`, `type_at`,
  * `press_at`, `select_at`) among it, answering `PIXEL_TAINTED` once a secret
  * has been filled, `locate` tries a semantic locator the way a test would,
+ * `try_lines` tries whole test statements on the session's fixtures,
  * `test_lines` returns the test line every action printed (`test-lines.ts`),
  * `start_recording` and `stop_recording` follow when the engine records video,
  * and the project's own tools come last. The config load refuses a project
@@ -27,6 +28,7 @@ import type { LocatorEngine } from '../locator/engine.ts';
 import type { AgentTool, Role } from '../types.ts';
 import { recordingTools, type SessionRecorder } from './recording.ts';
 import { SessionTestLines, type TestLineFills } from './test-lines.ts';
+import { tryLinesTool, type TryLinesSession } from './try-lines.ts';
 
 /** How many matching nodes `locate` describes. */
 const MAX_LOCATE_NODES = 10;
@@ -66,6 +68,8 @@ export interface CatalogOptions {
   readonly warn: (message: string) => void;
   /** Told the cause of every grammar action that failed into a result. */
   readonly onActionFailed?: ((cause: unknown) => void) | undefined;
+  /** The attempt's fixtures and what guards them, for `try_lines`; without them the catalog has no `try_lines`. */
+  readonly lines?: TryLinesSession | undefined;
 }
 
 /** Builds the session's catalog from the step context and the target. */
@@ -88,6 +92,7 @@ export function createSessionCatalog(options: CatalogOptions): SessionCatalog {
     observe: fullObserveTool(context, screen),
     ...lines.wrap(verbs),
     locate: locateTool(locator, options.session, options.redaction),
+    ...(options.lines === undefined ? {} : { try_lines: tryLinesTool({ ...options.lines, context, screen }) }),
     test_lines: lines.tool(),
     ...recording,
   };

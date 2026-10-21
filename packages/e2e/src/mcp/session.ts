@@ -315,6 +315,12 @@ export class SessionHost {
         }),
         warn: (message) => this.log('warning', message),
         onActionFailed: (cause) => usage.failed(classifyError(cause).code),
+        lines: {
+          fixtures: attempt.fixtures,
+          runtime: attempt.agentRuntime,
+          budget: attempt.budget,
+          browser: Object.hasOwn(target.engine?.fixtures ?? {}, 'browser'),
+        },
       });
       const live: LiveSession = {
         id,

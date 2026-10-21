@@ -22,7 +22,7 @@ The Rules and Feedback sections below still apply.
 | When you are | Topic | Read |
 | --- | --- | --- |
 | Adding e2e to a project, writing `e2e.config.ts`, starting the app from the config, signing in to a model, setting up mobile targets | `setup` | [references/setup.md](references/setup.md) |
-| Looking at the running app, checking a UI change, taking a screenshot or video, or trying a locator before writing it, over `e2e mcp` | `mcp` | [references/mcp.md](references/mcp.md) |
+| Looking at the running app, checking a UI change, taking a screenshot or video, or trying a locator or a test line before writing it, over `e2e mcp` | `mcp` | [references/mcp.md](references/mcp.md) |
 | Writing or fixing a test: fixtures, locators, actions, matchers, sign-in sessions, the `browser` fixture, API-only tests | `writing-tests` | [references/writing-tests.md](references/writing-tests.md) |
 | Adding `agent.*` steps, picking a model, cutting cost, budgets, the replay cache | `agent` | [references/agent.md](references/agent.md) |
 | Running tests: CLI flags, CI, reporters, trace pages, `report.json` for scripts, exit codes | `running` | [references/running.md](references/running.md) |
@@ -91,7 +91,8 @@ test('a member upgrades to Pro', async ({ app, agent, screen, browser }) => {
    the components, open the page with `--headed`, or drive the live app over
    a connected `e2e mcp` server (topic `mcp`): `open_session`, `observe`,
    and `locate` show exact names and check a locator before you write it,
-   and each action prints the test line that repeats it.
+   each action prints the test line that repeats it, and `try_lines` runs
+   your own lines on the live app.
 3. Write `tests/<feature>.e2e.ts`. Drive the flow with `agent.act`, one
    atomic goal per call, and pin each outcome right after with `expect` or
    `agent.assert`. A test with three goals makes three calls.
