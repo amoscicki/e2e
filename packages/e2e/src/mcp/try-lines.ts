@@ -36,13 +36,16 @@ import type { StandaloneAttempt } from '../run/standalone.ts';
 import { secretHandle } from '../secrets.ts';
 import type { ActionOptions, App, Screen, Secret } from '../types.ts';
 import { parseLines, type Call, type Chain, type Statement, type Value } from './lines-parse.ts';
+import { SURFACE } from './lines-surface.ts';
 
 /** How long one statement may wait unless the call says otherwise, in milliseconds. */
 const TRY_LINES_TIMEOUT_MS = 5_000;
 /** The longest a call may let one statement wait. */
 const MAX_TIMEOUT_MS = 120_000;
-/** The queries that match their text argument inside the engine. */
-const QUERIES: ReadonlySet<string> = new Set(['getByRole', 'getByLabel', 'getByPlaceholder', 'getByText', 'getByDisplayValue', 'getByTestId']);
+/** Every member that builds a locator, so a query the grammar gains is checked as soon as it is listed. */
+const QUERIES: ReadonlySet<string> = new Set([...SURFACE.locator].flatMap(([name, member]) => (member.kind === 'query' ? [name] : [])));
+/** What the secret ledger writes where a value was. */
+const SECRET_MARKER = '<secret:';
 
 /** What the session hands `try_lines`. */
 export interface TryLinesSession {
@@ -106,6 +109,7 @@ export function tryLinesTool(options: TryLinesOptions): ToolSet[string] {
 async function tryLines(options: TryLinesOptions, runner: LineRunner, args: TryLinesArgs, signal: AbortSignal | undefined): Promise<TriedLines> {
   const statements = parseLines(args.code, { fixtures: options.engineFixtures });
   const { agentRuntime: runtime, budget } = options.attempt;
+  refuseMarkerExpectations(statements);
   if (runtime.config.allSecrets.size > 0) refuseLocatorsByPart(statements);
   const timeout = args.timeout ?? TRY_LINES_TIMEOUT_MS;
   const outcomes: Outcome[] = [];
@@ -131,7 +135,7 @@ async function tryLines(options: TryLinesOptions, runner: LineRunner, args: TryL
 /**
  * Refuses, before anything runs, a statement that finds a locator by part of
  * a text: a regular expression, an `exact` that is not `true`, or a `hasText`
- * filter. The engine matches those against the page as it is, secret values
+ * filter. The engine matches those on unredacted text, secret values
  * included, so whether one matches could spell a value out a piece at a time.
  */
 function refuseLocatorsByPart(statements: readonly Statement[]): void {
@@ -142,7 +146,36 @@ function refuseLocatorsByPart(statements: readonly Statement[]): void {
     if (![subject, ...locatorsIn(calls)].some((chain) => chain.calls.some(findsByPart))) return;
     throw new ConfigurationError(
       'POLICY_DENIED',
-      `try_lines: statement ${String(index + 1)} (${statement.source}) finds a locator by part of a text, and this project configures secrets: the engine matches a regular expression, exact: false, or hasText against the page as it is, so whether it matches could spell a secret out one piece at a time. Find the locator by its exact text; nothing ran.`,
+      `try_lines: statement ${String(index + 1)} (${statement.source}) finds a locator by part of a text, and this project configures secrets: the engine matches a regular expression, exact: false, or hasText on unredacted text, so whether it matches could spell a secret out one piece at a time. Find the locator by its exact text; nothing ran.`,
+    );
+  });
+}
+
+/**
+ * Refuses, before anything runs, a matcher that expects a secret marker. The
+ * matcher would compare it against redacted text and pass, while the same
+ * line in a test compares the real value and fails.
+ */
+function refuseMarkerExpectations(statements: readonly Statement[]): void {
+  const holdsMarker = (value: Value): boolean => {
+    switch (value.kind) {
+      case 'literal':
+        return typeof value.value === 'string' && value.value.includes(SECRET_MARKER);
+      case 'regex':
+        return value.source.includes(SECRET_MARKER);
+      case 'array':
+        return value.items.some(holdsMarker);
+      case 'object':
+        return value.entries.some(([, item]) => holdsMarker(item));
+      default:
+        return false;
+    }
+  };
+  statements.forEach((statement, index) => {
+    if (statement.body.kind !== 'expect' || !statement.body.matcher.args.some(holdsMarker)) return;
+    throw new ConfigurationError(
+      'INVALID_ARGUMENT',
+      `try_lines: statement ${String(index + 1)} (${statement.source}) expects ${SECRET_MARKER}name>, which only redacted text holds: a test compares the real value, so the line would fail there. Assert what the screen shows around the secret instead; nothing ran.`,
     );
   });
 }

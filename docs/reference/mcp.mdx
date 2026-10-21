@@ -252,6 +252,9 @@ call {tool: "try_lines", args: {code: "await screen.getByLabel('Email').fill('ad
   [`actionTimeout`](/reference/config#actiontimeout) and
   [`assertionTimeout`](/reference/config#assertiontimeout) still apply when
   shorter, and a statement's own `timeout` option counts up to `timeout`.
+  The cap covers `app.open`, `app.restart`, and `app.clearState` too, which
+  a test gives the whole [`timeout`](/reference/config#timeout): raise it for
+  a slow first load or a device relaunch.
 
 The code is parsed, never run as JavaScript. The grammar takes:
 
@@ -268,7 +271,7 @@ Left out: fixtures an engine contributes (`browser`, `device`),
 
 | Throws | When |
 | --- | --- |
-| `INVALID_ARGUMENT` | Code outside the grammar, such as another name, a call it lacks, an assignment, or a function. The message names the token with its line and column, and no statement runs. |
+| `INVALID_ARGUMENT` | Code outside the grammar, such as another name, a call it lacks, an assignment, or a function. The message names the token with its line and column, and no statement runs. Also a matcher that expects `<secret:name>`. |
 | `POLICY_DENIED` | A secret `fill` into a field `type_secret` would refuse, a read of a password field, or, in a project with secrets, a locator found by part of a text. |
 
 A secret `fill` passes the checks `type_secret` runs, on the field it lands
@@ -278,11 +281,15 @@ withholds screenshots as `type_secret` does.
 
 Every node a statement reads passes the secret ledger first. A read returns
 `<secret:name>` where a secret value is, and a matcher compares against that
-text, so no pass or fail depends on a secret's characters. A locator is
-matched inside the engine instead, against the page as it is. So when the
-config declares any secret or credential, a locator found by part of a text
-is refused before any statement runs: a regular expression, an `exact` other
-than `true`, or a `hasText` filter. Find the locator by its exact text.
+text, so no pass or fail depends on a secret's characters. A matcher on such
+text can then differ from the same line in a test, and one that expects
+`<secret:name>` is `INVALID_ARGUMENT`, since a test compares the real value.
+
+A locator is matched inside the engine instead, on unredacted text. So when
+the config declares any secret or credential, a locator found by part of a
+text is `POLICY_DENIED` before any statement runs: a regular expression, an
+`exact` other than `true`, or a `hasText` filter. Find the locator by its
+exact text.
 
 A regular expression that repeats a group with a quantifier or `|` inside,
 such as `(\w+\s?)*`, is `INVALID_ARGUMENT`: it can backtrack for hours on a

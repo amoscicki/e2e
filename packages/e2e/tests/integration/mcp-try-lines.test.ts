@@ -203,8 +203,14 @@ await expect(screen.getByTestId('plain')).toHaveText('nothing yet');`, 300);
         expect(probed.text, code).toContain('ASSERTION_FAILED');
         expect(probed.text, code).toContain('<secret:apiKey>');
       }
-      const marker = await tryLines("await expect(screen.getByTestId('plain')).toHaveText('<secret:apiKey>');");
-      expect(marker.isError, marker.text).toBe(false);
+      // A test compares the real value, so a line expecting the marker would pass here and fail there.
+      const marker = await tryLines("await screen.getByLabel('Note').fill('kept');\nawait expect(screen.getByTestId('plain')).toHaveText('<secret:apiKey>');");
+      expect(marker.isError).toBe(true);
+      expect(marker.text).toBe(
+        "INVALID_ARGUMENT: try_lines: statement 2 (await expect(screen.getByTestId('plain')).toHaveText('<secret:apiKey>');) expects <secret:name>, which only redacted text holds: a test compares the real value, so the line would fail there. Assert what the screen shows around the secret instead; nothing ran.",
+      );
+      const note = await tryLines("await screen.getByLabel('Note').inputValue();");
+      expect(note.text).toContain('returned ""');
     });
 
     it('refuses a locator found by part of a text in a project with secrets, before anything runs', async () => {
