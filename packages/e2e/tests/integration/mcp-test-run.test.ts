@@ -6,12 +6,14 @@
  * its locator, and the session then observes the screen it failed on;
  * `afterEach` waits for `close_session`; a reopened session runs the test
  * files as they are now; a promise a test left rejected fails that test
- * rather than the server; a `beforeAll` failure is the outcome, once, with
- * no screen; a screenshot baseline one session wrote passes the next; a name
- * that selects no test, several, or one a session cannot run alone fails
- * before anything boots. In-process, with a
- * scripted model: the replay cache serves a session's test as it serves
- * `e2e run`, both ways.
+ * rather than the server, before and after its close; a body its timeout cut
+ * short can't drive the session; a `beforeAll` failure is the outcome, once,
+ * with no screen; a screenshot baseline one session wrote passes the next; a
+ * name that selects no test, several, or one a session cannot run alone fails
+ * before anything boots. In-process: the replay cache serves a session's test
+ * as it serves `e2e run`, both ways, with a scripted model; two sessions
+ * collect and run their tests one at a time; and an open cancelled while its
+ * test waits for its turn runs none of it.
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -102,6 +104,19 @@ test('leaves a promise behind', async ({ app }) => {
     void Promise.reject(new Error('late failure'));
   }, 50);
 });
+
+test('leaves a promise for after the close', async ({ app }) => {
+  await app.open('/');
+  setTimeout(() => {
+    void Promise.reject(new Error('later failure'));
+  }, 1_500);
+});
+
+test('outlives its timeout', { timeout: 1_000 }, async ({ app }) => {
+  await app.open('/');
+  await new Promise((resolve) => setTimeout(resolve, 2_000));
+  await app.open('/about');
+});
 `;
 
 const HOOKS = `import { beforeAll, test } from 'e2e';
@@ -157,6 +172,7 @@ describe('open_session {test}', { timeout: 120_000 }, () => {
   describe('over e2e mcp', () => {
     let project: FixtureProject;
     let client: Client;
+    let stderr = '';
 
     const invoke = async (name: string, args: Record<string, unknown> = {}): Promise<ToolText> => {
       const result = (await client.callTool({ name, arguments: args }, { timeout: 110_000 })) as { content: { type: string; text?: string }[]; isError?: boolean };
@@ -181,6 +197,9 @@ describe('open_session {test}', { timeout: 120_000 }, () => {
         cwd: project.dir,
         env: { ...(process.env as Record<string, string>), APP_URL: app.url, CI: '' },
         stderr: 'pipe',
+      });
+      transport.stderr?.on('data', (chunk: Buffer) => {
+        stderr += chunk.toString();
       });
       client = new Client({ name: 'e2e-mcp-test-run', version: '0.0.0' });
       await client.connect(transport);
@@ -247,8 +266,28 @@ describe('open_session {test}', { timeout: 120_000 }, () => {
       const closed = await invoke('close_session');
       expect(closed.text).toContain('Cleanup: UNHANDLED_REJECTION: a promise rejected after the test\'s body ended, most likely left by "leaves a promise behind": late failure');
 
+      // One that rejects once its session closed is a warning for the operator, not a crash.
+      const early = await invoke('open_session', { test: `tests/sloppy.e2e.ts:${lineOf(SLOPPY, "test('leaves a promise for after the close'")}` });
+      expect(early.text).toMatch(/^Test "leaves a promise for after the close" .* passed/);
+      await invoke('close_session');
+      await new Promise((resolve) => setTimeout(resolve, 2_500));
+      expect(stderr).toContain('e2e mcp: [warning] a promise rejected after its session closed, most likely left by test "leaves a promise for after the close": later failure');
+
       const after = await invoke('open_session', { test: `tests/counter.e2e.ts:${PASSING}` });
       expect(after.text).toMatch(/^Test "counts to one" .* passed/);
+      await invoke('close_session');
+    });
+
+    it('keeps a body its timeout cut short from driving the session', async () => {
+      const opened = await invoke('open_session', { test: `tests/sloppy.e2e.ts:${lineOf(SLOPPY, "test('outlives its timeout'")}` });
+      expect(opened.text).toMatch(/^Test "outlives its timeout" .* timed out after \S+; 1 step ran\.\nTEST_TIMEOUT: test timed out after 1000 ms in phase body\n/);
+      expect(opened.text).not.toContain("app.open('/about')");
+      expect(opened.text).toContain('heading "Home"');
+      // Past the time the body's last line would have run: it ran out of budget and opened nothing.
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      const observed = await observe();
+      expect(observed).toContain('heading "Home"');
+      expect(observed).not.toContain('document "About page"');
       await invoke('close_session');
     });
 
@@ -355,11 +394,56 @@ test(${JSON.stringify(title)}, async ({ app }) => {
         // A top-level await yields collection's slot halfway through the file.
         'tests/slow-load.e2e.ts': polling('loads slowly', 'await new Promise((resolve) => setTimeout(resolve, 300));'),
         'tests/quick-load.e2e.ts': polling('loads quickly'),
+        // Holds its turn until the case releases it, through the process both share.
+        'tests/held.e2e.ts': `import { test } from 'e2e';
+
+test('holds its turn', async ({ app }) => {
+  await app.open('/');
+  const shared = globalThis as unknown as { f1Held: () => void; f1Gate: Promise<void> };
+  shared.f1Held();
+  await shared.f1Gate;
+});
+`,
+        'tests/marked.e2e.ts': `import { writeFileSync } from 'node:fs';
+import { beforeAll, test } from 'e2e';
+
+beforeAll(() => {
+  writeFileSync(new URL('../marked.txt', import.meta.url), 'ran');
+});
+
+test('marks', async ({ app }) => {
+  await app.open('/');
+});
+`,
       });
     });
 
     afterAll(() => {
       project?.cleanup();
+    });
+
+    it('runs none of a test whose open was cancelled while it waited for its turn', async () => {
+      const sessions = inProcessHost(project);
+      const shared = globalThis as unknown as { f1Held: () => void; f1Gate: Promise<void> };
+      let release = (): void => undefined;
+      const held = new Promise<void>((resolve) => {
+        shared.f1Held = resolve;
+      });
+      shared.f1Gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const holding = sessions.open({ test: 'tests/held.e2e.ts' });
+      await held;
+      const cancel = new AbortController();
+      const waiting = sessions.open({ test: 'tests/marked.e2e.ts' }, cancel.signal);
+      // Long enough for the second session to boot and queue behind the first.
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      cancel.abort();
+      await expect(waiting).rejects.toMatchObject({ code: 'CANCELLED' });
+      release();
+      expect(await holding).toMatch(/^Test "holds its turn" \(tests\/held\.e2e\.ts:\d+\) passed/);
+      await sessions.closeAll('done');
+      expect(existsSync(path.join(project.dir, 'marked.txt'))).toBe(false);
     });
 
     it('collect and run their tests one at a time, and both pass', async () => {

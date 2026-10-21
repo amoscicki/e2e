@@ -182,26 +182,36 @@ export async function launchAttempt(
   // Launch was the worker's work; the test's deadline starts once its fixtures exist.
   budget.enter(attemptSignal, options.timeoutMs);
   const attempt: ExecutorAttempt = { testId: identity.testId, attemptId, index: 0, signal: end.signal, memory: new Map<string, unknown>() };
-  // A test's agent steps replay and record as on a run's first attempt, and
-  // its screenshots count as written by a run of their own: a baseline one
-  // session wrote is compared against in the next, as the next run would.
-  const cache = test === undefined
-    ? undefined
-    : createAgentCacheContext({
-      cache: config.cache, projectRoot: config.projectRoot, projectId: config.projectId, testId: test.pair.test.id,
-      target: targetIdentity(target), attemptIndex: 0, recordings: storedRecordingsFor(config.cache),
-    });
+  const base = {
+    config, target, session: opened, steps, runId, attemptId, attempt, artifacts: artifacts.sink,
+    priorSteps: () => steps.completed(), agent: options.agent, saveSession: undefined,
+    models: new WorkerModels((error) => recordFailure(error, 'body')), debug: worker.debug,
+  };
   let acquired: ReturnType<typeof createFixtures>;
+  let testRun: StandaloneTestRun | undefined;
   try {
-    acquired = createFixtures({
-      config, target, session: opened, steps, budget, runId, attemptId, attempt, artifacts: artifacts.sink,
-      priorSteps: () => steps.completed(), agent: options.agent, agentContext: test?.pair.options.agentContext, saveSession: undefined,
-      models: new WorkerModels((error) => recordFailure(error, 'body')), debug: worker.debug,
-      ...(cache === undefined ? {} : { cache }),
-      ...(test === undefined
-        ? {}
-        : { test: { file: test.pair.test.file, titlePath: test.pair.test.titlePath, writtenScreenshots: new WrittenScreenshots(artifacts.dir) } }),
-    });
+    acquired = createFixtures({ ...base, budget, agentContext: undefined });
+    if (test !== undefined) {
+      // The test's fixtures have a budget of their own, so a body its timeout
+      // cut short cannot drive the session the agent uses afterwards. Its
+      // agent steps replay and record as on a run's first attempt, and its
+      // screenshots count as written by a run of their own: a baseline one
+      // session wrote is compared against in the next, as the next run would.
+      const testBudget = new AttemptBudget(attemptSignal, new Deadline(test.pair.options.timeout));
+      const cache = createAgentCacheContext({
+        cache: config.cache, projectRoot: config.projectRoot, projectId: config.projectId, testId: test.pair.test.id,
+        target: targetIdentity(target), attemptIndex: 0, recordings: storedRecordingsFor(config.cache),
+      });
+      const { fixtures } = createFixtures({
+        ...base, budget: testBudget, agentContext: test.pair.options.agentContext,
+        ...(cache === undefined ? {} : { cache }),
+        test: { file: test.pair.test.file, titlePath: test.pair.test.titlePath, writtenScreenshots: new WrittenScreenshots(artifacts.dir) },
+      });
+      testRun = createStandaloneTestRun({
+        config, target, executor, runId, attemptId, session: opened, steps, budget: testBudget, fixtures,
+        artifacts: artifacts.sink, cache, signal: attemptSignal, redact,
+      }, test);
+    }
   } catch (cause) {
     end.abort();
     await closeOpened({ status: 'failed', cleanup: 'complete' });
@@ -274,12 +284,6 @@ export async function launchAttempt(
     })();
     return ending;
   };
-  const testRun = test === undefined
-    ? undefined
-    : createStandaloneTestRun({
-      config, target, executor, runId, attemptId, session: opened, steps, budget, fixtures: acquired.fixtures,
-      artifacts: artifacts.sink, cache, signal: attemptSignal, deadline, redact,
-    }, test);
   return {
     runId, attemptId, fixtures: acquired.fixtures, agentRuntime: acquired.agentRuntime, session: opened, steps, budget,
     artifactsDir: artifacts.dir, tracePath, test: testRun, close,

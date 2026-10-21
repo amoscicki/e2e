@@ -404,8 +404,9 @@ Start the server in the project directory. Config discovery works like
   unknown.
 - A promise a session's test leaves rejected fails that test, as in a run.
   One that rejects after the test's body ended is an `UNHANDLED_REJECTION`
-  line in `close_session`'s result. Any other error nobody caught is logged
-  redacted and shuts the server down.
+  line in `close_session`'s result, and a warning on stderr once the session
+  has closed. Any other error nobody caught, a rejection before any session
+  has run a test included, is logged redacted and shuts the server down.
 
 <Note>
 A child process that inherits the server's stdio writes past this.

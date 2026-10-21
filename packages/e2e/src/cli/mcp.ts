@@ -97,10 +97,11 @@ export async function mcp(version: string, options: McpCommandOptions, telemetry
     output.report(`e2e mcp: [error] uncaught: ${text}`);
     stop.abort();
   };
-  // A rejection nobody handled fails the test a session runs when one can be
-  // charged with it, as in a run's worker, and is otherwise uncaught.
+  // A rejection nobody handled is charged to the test a session ran, as in a
+  // run's worker, once one has; before that it is uncaught.
   const onRejection = (cause: unknown): void => {
-    if (isAbandonedRejection(cause) || claimStrayRejection(cause)) return;
+    if (isAbandonedRejection(cause)) return;
+    if (claimStrayRejection(cause, (message) => output.log(`e2e mcp: [warning] ${processSecrets.redact(message)}`))) return;
     onUncaught(cause);
   };
   process.once('SIGINT', onSignal);

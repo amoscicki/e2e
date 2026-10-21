@@ -22,7 +22,7 @@ import {
   classifyError, ConfigurationError, E2EError, InfrastructureError, serializeError, TestError, TestTimeoutError, type ErrorPhase, type SerializedError,
 } from '../internal/errors.ts';
 import { isRuntimeSkip, type RuntimeSkip } from '../internal/skip.ts';
-import { withAbort, withTimeout, type Deadline } from '../internal/time.ts';
+import { withAbort, withTimeout } from '../internal/time.ts';
 import type { SetupFn } from '../types.ts';
 import type { AttemptBudget } from './budget.ts';
 import { classifyAttemptStatus, type TargetExecutor } from './execute.ts';
@@ -129,14 +129,13 @@ interface StandaloneTestEnvironment {
   readonly attemptId: string;
   readonly session: TargetSession;
   readonly steps: StepRecorder;
+  /** The test's own budget, which only `fixtures` read; the session's tools have another. */
   readonly budget: AttemptBudget;
   readonly fixtures: AttemptFixtures['fixtures'];
   readonly artifacts: ArtifactSink;
   readonly cache: AgentCacheContext | undefined;
   /** The attempt's cancellation: the body's budget and every teardown hook's follow it. */
   readonly signal: AbortSignal;
-  /** The attempt's deadline, which its budget returns to once the body has ended. */
-  readonly deadline: Deadline;
   readonly redact: (text: string) => string;
 }
 
@@ -177,23 +176,31 @@ interface Started {
 
 /** Where a rejection nobody handled goes while test code takes its turn. */
 let strayInTurn: ((cause: unknown) => void) | undefined;
-/** The run whose turn ended last and whose teardown is still to come: a promise its test left can reject later. */
-let lastRun: { readonly late: (cause: unknown) => void } | undefined;
+/** Runs whose turn ended and whose teardown has not, oldest first: a promise their test left can still reject. */
+const liveRuns: { readonly late: (cause: unknown) => void }[] = [];
+/** The test the run that ended last ran, which a rejection landing once every such session closed most likely came from. */
+let lastTest: string | undefined;
 
 /**
- * Takes a rejection nobody in the process handled when a test a session ran
- * can be charged with it, as a run's worker does: test code taking its turn
- * fails with it, the way a body cut short by its timeout does, and between
- * turns the run that ended last reports it at its close. False when no
- * session's test is live, so the caller treats it as any uncaught error.
+ * Takes a rejection nobody in the process handled once a session has run a
+ * test, as a run's worker does once a test has run: test code taking its
+ * turn fails with it, the way a body cut short by its timeout does; between
+ * turns the newest run still open reports it at its close; and once every
+ * such session closed, `warn` tells the operator. False before any session
+ * ran a test, so the caller treats it as any uncaught error.
  */
-export function claimStrayRejection(cause: unknown): boolean {
+export function claimStrayRejection(cause: unknown, warn: (message: string) => void): boolean {
   if (strayInTurn !== undefined) {
     strayInTurn(cause);
     return true;
   }
-  if (lastRun === undefined) return false;
-  lastRun.late(cause);
+  const newest = liveRuns.at(-1);
+  if (newest !== undefined) {
+    newest.late(cause);
+    return true;
+  }
+  if (lastTest === undefined) return false;
+  warn(`a promise rejected after its session closed, most likely left by test "${lastTest}": ${classifyError(cause).message}`);
   return true;
 }
 
@@ -247,6 +254,8 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
       failurePhase = phase;
     };
     let phase: RunPhase = 'beforeAll';
+    /** How many steps the test had recorded when its body ended; a body cut short that runs on records more. */
+    let stepsRan: number | undefined;
     /** Ends the body the way its timeout does, while the body's race is pending. */
     let cutBody: ((cause: unknown) => void) | undefined;
     // A rejection nobody handled is charged to this turn, as a run's worker charges the attempt in flight.
@@ -257,7 +266,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
     if (hookFailure !== undefined) {
       fail(new E2EError('test', hookFailure.code, hookFailure.message), 'beforeAll');
     } else {
-      // The test's own timeout bounds its hooks and body; the session's deadline comes back after.
+      // The test's own timeout bounds its hooks and body.
       const bodyAbort = budget.enter(env.signal, pair.options.timeout);
       const soft = new SoftFailures();
       const polls = new PollScope('the test body');
@@ -267,12 +276,15 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
       try {
         extended = createExtendedFixtures(registered.fixtures, env.fixtures, env.target.engine?.name ?? 'none', budget.signal);
         const fixtures = extended;
+        /** Set once the body's race settled: a body cut short that runs on is no longer the test's to report. */
+        let bodyOver = false;
         const enter = (next: RunPhase): void => {
           phase = next;
           steps.phase = next === 'beforeEach' ? 'beforeEach' : undefined;
         };
         /** Steps and polls the body left running, failed at their call and cancelled; see `executeAttempt`. */
         const abandonNotAwaited = async (): Promise<E2EError[]> => {
+          if (bodyOver) return [];
           const pollsNotAwaited = polls.close();
           const stepsNotAwaited = steps.abandonRunning();
           if (stepsNotAwaited !== undefined) {
@@ -304,8 +316,9 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
           const softFailure = soft.close();
           if (softFailure !== undefined) throw softFailure;
         };
+        const work = runInPollScope(polls, mainWork);
         const body = Promise.race([
-          runInPollScope(polls, mainWork),
+          work,
           new Promise<never>((_, reject) => {
             cutBody = (cause) => {
               bodyAbort.abort();
@@ -325,7 +338,13 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
           else fail(cause, phase);
         } finally {
           cutBody = undefined;
+          bodyOver = true;
+          stepsRan = steps.all().length;
         }
+        // A body cut short still runs until it reaches a harness call, which
+        // fails on its aborted budget; it gets the cleanup budget to get there
+        // while the turn is still its own.
+        await withTimeout(work, config.cleanupTimeout, () => new Error('the test body did not stop')).catch(() => undefined);
         // A rejection the body left unawaited lands once the microtasks drain.
         await new Promise<void>((resolve) => setImmediate(resolve));
         const lateSoft = soft.close();
@@ -345,6 +364,8 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
     const interrupted = env.signal.aborted;
     const status: StandaloneTestOutcome['status'] =
       failure === undefined ? (skipped === undefined ? 'passed' : 'skipped') : classifyAttemptStatus(failure, timedOut, interrupted);
+    // The verdict stands: what lands from here on is noted beside it.
+    strayInTurn = (cause) => secondaryErrors.push(serialize(cause, 'body'));
     let evidence: FailureEvidence | undefined;
     if (failure !== undefined && !interrupted) {
       evidence = await captureFailureEvidence({
@@ -369,8 +390,8 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
             },
       );
     }
-    // The attempt goes on as the session: its budget is the session's again.
-    budget.enter(env.signal, Math.max(1, env.deadline.remaining()));
+    // Parked until teardown: a body that outlived its turn finds every harness call refused.
+    budget.enter(env.signal, 1).abort();
     const outcome: StandaloneTestOutcome = {
       status,
       ...(failure === undefined ? {} : { error: serialize(failure, failurePhase) }),
@@ -378,7 +399,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
       ...(skipped === undefined ? {} : { skipReason: skipped.reason }),
       ...(evidence === undefined ? {} : { failure: evidence }),
       durationMs: Date.now() - startedMs,
-      steps: [...steps.all()],
+      steps: steps.all().slice(0, stepsRan),
     };
     const teardowns =
       extended === undefined
@@ -396,9 +417,10 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
       // A session closed or cancelled while it waited for its turn runs none of the test's code.
       if (tearingDown !== undefined || env.signal.aborted) throw new InfrastructureError('CANCELLED', 'the session ended before its test ran');
       begun = true;
+      lastTest = test.pair.test.titlePath.join(' › ');
       try {
         const result = await execute();
-        if (result.started !== undefined) lastRun = self;
+        if (result.started !== undefined) liveRuns.push(self);
         return result;
       } finally {
         strayInTurn = undefined;
@@ -438,7 +460,8 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
           steps.phase = undefined;
           publication.abort();
           strayInTurn = undefined;
-          if (lastRun === self) lastRun = undefined;
+          const live = liveRuns.indexOf(self);
+          if (live !== -1) liveRuns.splice(live, 1);
         }
         return [...lateErrors, ...errors];
       }).catch((cause: unknown) => [...lateErrors, serialize(cause, 'cleanup')]);
