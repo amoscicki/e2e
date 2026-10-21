@@ -4,8 +4,9 @@
  * run on the session's fixtures with the test API's own waiting, matching,
  * and matchers; they stop at the first failure within the call's timeout;
  * code outside the grammar runs nothing. A Secret fills only under the
- * authorization `type_secret` runs, reads come back redacted, a password
- * field stays unreadable, and the pixel taint follows a fill as usual.
+ * authorization `type_secret` runs, reads and matchers see redacted text, a
+ * locator found by part of a text is refused in a project with secrets, a
+ * password field stays unreadable, and the pixel taint follows a fill.
  */
 
 import path from 'node:path';
@@ -190,31 +191,42 @@ await expect(screen.getByTestId('plain')).toHaveText('nothing yet');`, 300);
       expect(echoed.text).toContain('observed: text "<secret:apiKey>"');
     });
 
-    it('refuses a partial match while a secret value is on screen, so no pass or fail spells it out', async () => {
+    it('compares matchers against redacted text, so no pass or fail depends on a secret', async () => {
       // The secret from the test before is still in the Token field and its echoes.
       for (const code of [
-        "await screen.getByDisplayValue(/^sk-l/).count();",
         "await expect(screen.getByTestId('plain')).toContainText('sk-live');",
-        "await screen.getByText('sk-l', { exact: false }).count();",
-        "await screen.getByTestId('plain').filter({ hasText: 'sk-l' }).count();",
+        "await expect(screen.getByLabel('Token')).toHaveValue(/^sk-l/);",
+        "await expect(screen.getByTestId('upper')).toHaveText(/SK-LIVE/i);",
       ]) {
+        const probed = await tryLines(code, 300);
+        expect(probed.isError, code).toBe(true);
+        expect(probed.text, code).toContain('ASSERTION_FAILED');
+        expect(probed.text, code).toContain('<secret:apiKey>');
+      }
+      const marker = await tryLines("await expect(screen.getByTestId('plain')).toHaveText('<secret:apiKey>');");
+      expect(marker.isError, marker.text).toBe(false);
+    });
+
+    it('refuses a locator found by part of a text in a project with secrets, before anything runs', async () => {
+      for (const [code, statement] of [
+        ["await screen.getByDisplayValue(/^sk-l/).count();", 1],
+        ["await screen.getByText('sk-l', { exact: false }).count();", 1],
+        ["await screen.getByText('sk-l', { exact: 0 }).count();", 1],
+        ["await app.open('/echo');\nawait screen.getByTestId('plain').filter({ hasText: 'sk-l' }).count();", 2],
+        ["await screen.getByRole('textbox', { name: /Token/ }).fill('typed');", 1],
+        ["await expect(screen.getByRole('row').filter({ has: screen.getByText(/sk/) })).toHaveCount(0);", 1],
+      ] as const) {
         const probed = await tryLines(code);
         expect(probed.isError, code).toBe(true);
-        expect(probed.text, code).toContain('POLICY_DENIED: a secret value is on screen (observe shows <secret:name> where it is) and this statement matches part of a text, so it did not run');
-        expect(probed.text, code).not.toContain('returned');
+        expect(probed.text, code).toMatch(new RegExp(`^POLICY_DENIED: try_lines: statement ${String(statement)} \\(.*\\) finds a locator by part of a text, and this project configures secrets`));
+        expect(probed.text, code).toContain('nothing ran.');
       }
       const exact = await tryLines("await screen.getByDisplayValue('sk-live-WRONG').count();");
       expect(exact.isError, exact.text).toBe(false);
       expect(exact.text).toContain('returned 0');
-
-      // A partial match that puts a secret on screen ran, and its outcome is withheld.
-      const fresh = await tryLines(`await app.open('/echo');
-await screen.getByRole('textbox', { name: /Token/ }).fill(secrets.get('apiKey'));
-await screen.getByLabel('Note').fill('after');`);
-      expect(fresh.isError).toBe(true);
-      expect(fresh.text).toContain('Statement 2 of 3 failed');
-      expect(fresh.text).toContain('so it ran, and its outcome is withheld');
-      expect(fresh.text).toContain('3. not run:');
+      // The refused block never opened /echo again: the field still holds the secret.
+      const still = await tryLines("await screen.getByLabel('Token').inputValue();");
+      expect(still.text).toContain('returned "<secret:apiKey>"');
     });
 
     it('never returns a secret value', () => {

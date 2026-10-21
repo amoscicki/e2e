@@ -188,6 +188,9 @@ function tokenize(code: string): Token[] {
       } catch (cause) {
         throw invalid(`the regular expression at ${at(index)} is invalid: ${(cause as Error).message}`);
       }
+      if (repeatsRepetition(source)) {
+        throw invalid(`the regular expression at ${at(index)} repeats a group that repeats or alternates inside, which can run for hours on a short text; repeat a single character or class instead`);
+      }
       push('regex', index, end + flags.length, { value: pattern.source, flags: pattern.flags });
       index = end + flags.length;
       continue;
@@ -273,6 +276,56 @@ function readRegexBody(code: string, start: number, at: (offset: number) => stri
     index += 1;
   }
 }
+
+/**
+ * Whether a pattern repeats without bound a group that repeats or alternates
+ * inside, `(\w+\s?)*` or `(a|ab)+`: the shapes that backtrack exponentially.
+ * A matcher tests a tried pattern in the server's own thread, where no
+ * timeout can stop it, so such a pattern would hang every session.
+ */
+function repeatsRepetition(source: string): boolean {
+  const groups: { inner: boolean }[] = [];
+  /** The group that just closed, until a quantifier on it is read or another token is. */
+  let closed: { inner: boolean } | undefined;
+  for (let index = 0; index < source.length; index += 1) {
+    const quantifier = QUANTIFIER.exec(source.slice(index));
+    if (quantifier !== null) {
+      const unbounded = quantifier[1] === '*' || quantifier[1] === '+' || quantifier[2] === '';
+      if (closed?.inner === true && unbounded) return true;
+      const enclosing = groups.at(-1);
+      if (enclosing !== undefined) enclosing.inner = true;
+      index += quantifier[0].length - 1;
+      closed = undefined;
+      continue;
+    }
+    closed = undefined;
+    const char = source[index];
+    if (char === '\\') {
+      index += 1;
+    } else if (char === '[') {
+      for (index += 1; index < source.length && source[index] !== ']'; index += 1) {
+        if (source[index] === '\\') index += 1;
+      }
+    } else if (char === '(') {
+      groups.push({ inner: false });
+      index += GROUP_PREFIX.exec(source.slice(index + 1))?.[0].length ?? 0;
+    } else if (char === ')') {
+      const group = groups.pop();
+      const enclosing = groups.at(-1);
+      if (group?.inner === true && enclosing !== undefined) enclosing.inner = true;
+      closed = group;
+    } else if (char === '|') {
+      const enclosing = groups.at(-1);
+      if (enclosing !== undefined) enclosing.inner = true;
+    }
+  }
+  return false;
+}
+
+/** A quantifier, lazy or not: its kind, and for a brace its upper bound (empty when open). */
+const QUANTIFIER = /^(?:([*+?])|\{\d+(?:,(\d*))?\})\??/;
+/** What follows `(` in a group that is not a plain capture: `?:`, a lookaround, or a name. */
+const GROUP_PREFIX = /^\?(?:[:=!]|<[=!]|<[A-Za-z_$][\w$]*>)/;
 
 // --- statements ---
 

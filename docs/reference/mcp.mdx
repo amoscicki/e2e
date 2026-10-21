@@ -269,20 +269,24 @@ Left out: fixtures an engine contributes (`browser`, `device`),
 | Throws | When |
 | --- | --- |
 | `INVALID_ARGUMENT` | Code outside the grammar, such as another name, a call it lacks, an assignment, or a function. The message names the token with its line and column, and no statement runs. |
-| `POLICY_DENIED` | A secret `fill` into a field `type_secret` would refuse, a read of a password field, or a partial match while a secret value shows on screen. |
+| `POLICY_DENIED` | A secret `fill` into a field `type_secret` would refuse, a read of a password field, or, in a project with secrets, a locator found by part of a text. |
 
 A secret `fill` passes the checks `type_secret` runs, on the field it lands
 on: a configured secret, an enabled editable field, and a password field for
-a password. A field that fails them gets nothing typed. Reads return text
-through the secret ledger, and a filled secret withholds screenshots as
-`type_secret` does.
+a password. A field that fails them gets nothing typed, and a filled secret
+withholds screenshots as `type_secret` does.
 
-While a secret value shows on screen (`observe` shows `<secret:name>`), a
-statement that matches part of a text doesn't run: a regular expression,
-`exact: false`, `toContainText`, or a `hasText` filter. Its pass or fail
-would spell the value out one piece at a time. A statement that puts a
-secret on screen this way runs, and its outcome is withheld. Match the whole
-text instead.
+Every node a statement reads passes the secret ledger first. A read returns
+`<secret:name>` where a secret value is, and a matcher compares against that
+text, so no pass or fail depends on a secret's characters. A locator is
+matched inside the engine instead, against the page as it is. So when the
+config declares any secret or credential, a locator found by part of a text
+is refused before any statement runs: a regular expression, an `exact` other
+than `true`, or a `hasText` filter. Find the locator by its exact text.
+
+A regular expression that repeats a group with a quantifier or `|` inside,
+such as `(\w+\s?)*`, is `INVALID_ARGUMENT`: it can backtrack for hours on a
+short text, and nothing could stop it.
 
 #### `test_lines`
 

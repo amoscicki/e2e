@@ -16,6 +16,7 @@ const ARGUMENTS =
 const STATEMENTS = 'a statement starts with screen, app, or expect(...)';
 const LOCATOR_MEMBERS =
   'getByRole, getByLabel, getByPlaceholder, getByText, getByDisplayValue, getByTestId, tapAt, swipe, scrollUntilVisible, filter, first, last, nth, tap, click, doubleTap, dblclick, secondaryTap, longPress, fill, pressSequentially, clear, press, check, uncheck, selectOption, focus, hover, dragTo, scrollIntoView, waitFor, textContent, inputValue, getAttribute, isVisible, isHidden, isEnabled, isDisabled, isChecked, boundingBox, count, allTextContents';
+const NESTED = 'repeats a group that repeats or alternates inside, which can run for hours on a short text; repeat a single character or class instead';
 const SECRET_PLACE = "is accepted only as fill's value, such as screen.getByLabel('Password').fill(credentials.user('admin').password)";
 
 /** The message `try_lines` refuses `code` with. */
@@ -140,6 +141,15 @@ await screen.getByRole('textbox', { name: 'Notes', exact: null, level: [1, false
     expect(action!.body).toMatchObject({ kind: 'call', read: false });
   });
 
+  it('regular expressions that repeat a plain group, a class, or a character', () => {
+    const statements = parseLines(
+      String.raw`await expect(screen.getByRole('status')).toHaveText(/^Order \d+ of \d+$/);
+await expect(screen.getByRole('status')).toHaveText(/(ab)?c+(?<word>\w)+[(*+]+x{2,}/u);`,
+      WEB,
+    );
+    expect(statements).toHaveLength(2);
+  });
+
   it('a matcher negated once', () => {
     const [negated] = parseLines("await expect(screen.getByRole('dialog')).not.toBeVisible({ timeout: 100 })", WEB);
     expect(negated!.body).toMatchObject({ kind: 'expect', negated: true, matcher: { name: 'toBeVisible' } });
@@ -195,6 +205,9 @@ describe('parseLines refuses', () => {
     ["screen.getByRole('row').filter({ hasText }).tap()", 'try_lines: expected ":" after the property name "hasText", found "}" at 1:42'],
     ['screen.getByRole("row").nth(0x1).tap()', 'try_lines: the number at 1:29 is not a plain decimal number'],
     ['screen.getByText(/(/).tap()', 'try_lines: the regular expression at 1:18 is invalid: Invalid regular expression: /(/: Unterminated group'],
+    [String.raw`expect(screen.getByTestId('log')).toHaveText(/^(\w+\s?)*$/)`, `try_lines: the regular expression at 1:46 ${NESTED}`],
+    [String.raw`expect(screen.getByTestId('log')).toHaveText(/(?:\s*(a|ab))+/)`, `try_lines: the regular expression at 1:46 ${NESTED}`],
+    [String.raw`expect(screen.getByTestId('log')).toHaveText(/(x|y){2,}/)`, `try_lines: the regular expression at 1:46 ${NESTED}`],
     ["screen.getByText('a).tap()", 'try_lines: the string at 1:18 never ends'],
     ["screen.getByText('a').tap() /* trailing", 'try_lines: the comment at 1:29 never ends'],
     ['screen.getByText("é").tap() \\', 'try_lines: unexpected character "\\\\" at 1:29'],

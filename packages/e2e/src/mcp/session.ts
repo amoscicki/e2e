@@ -315,12 +315,7 @@ export class SessionHost {
         }),
         warn: (message) => this.log('warning', message),
         onActionFailed: (cause) => usage.failed(classifyError(cause).code),
-        lines: {
-          fixtures: attempt.fixtures,
-          engineFixtures: Object.keys(target.engine?.fixtures ?? {}),
-          runtime: attempt.agentRuntime,
-          budget: attempt.budget,
-        },
+        lines: { attempt, engineFixtures: Object.keys(target.engine?.fixtures ?? {}) },
       });
       const live: LiveSession = {
         id,
