@@ -259,7 +259,7 @@ Test line: await screen.getByRole("button", "Sign in").tap();
 
 | Action | Line |
 | --- | --- |
-| Opening the session | `app.open()` |
+| Opening the session, without [`test`](#running-a-test) | `app.open()` |
 | `tap`, `double_tap`, `long_press`, `right_click`, `hover` | `tap()`, `doubleTap()`, `longPress()`, `secondaryTap()`, `hover()`, with any `modifiers` |
 | `type` into a node | `fill(value)`; a credential's username as `credentials.user(name).username` |
 | `type_secret` | `fill(credentials.user(name).password)` or `fill(secrets.get(name))`, never the value |
@@ -474,6 +474,9 @@ open_session {test: "tests/checkout.e2e.ts:12"}
   with the code, the message, the failing line and the code around it, the
   URL, the nodes nearest a locator that matched nothing, and the last 15
   steps. The session summary, the catalog, and the screen follow.
+- **Test lines.** The test's own steps print no [test line](#test_lines).
+  The session's lines start with the agent's first action, and `test_lines`
+  returns them as the lines that continue the test.
 - **Teardown.** `afterEach` hooks, fixture teardowns, and `afterAll` hooks
   run at `close_session`, or when the session closes on its own. Their
   failures show as `Cleanup (afterEach)` and `Cleanup (afterAll)` lines.

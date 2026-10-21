@@ -27,7 +27,7 @@ import { SharedAppProcesses } from '../run/process-pool.ts';
 import { outputLayout } from '../run/output.ts';
 import { processSecrets, registerStaticSecrets, sessionSecrecy } from '../run/secrecy.ts';
 import { openStandaloneAttempt, type StandaloneAttempt } from '../run/standalone.ts';
-import { selectStandaloneTest } from '../run/standalone-test.ts';
+import { selectStandaloneTest, testLocation } from '../run/standalone-test.ts';
 import type { AgentParams } from '../types.ts';
 import { createSessionCatalog, isGrammarVerb, type SessionCatalog } from './catalog.ts';
 import type { LoadedConfig } from './config.ts';
@@ -325,6 +325,7 @@ export class SessionHost {
           credentials: [...config.credentials.values()].map((credential) => ({ name: credential.name, username: credential.username, password: credential.password.name })),
           secrets: [...config.secrets.keys()],
         },
+        testRan: test === undefined ? undefined : testLocation(test.pair.test),
         locator: new LocatorEngine({
           session: attempt.session,
           budget: attempt.budget,
@@ -417,6 +418,7 @@ export class SessionHost {
   }
 
   /**
+   * Opens the app URL when `open` asks and the engine can navigate, then
    * observes; a device's pinned app launched before the step opened. Either
    * opening is the test's `app.open()`, the session's first test line.
    * Without `open` the screen is the one a test left, and a test that failed

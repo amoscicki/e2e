@@ -5,7 +5,8 @@
  * a failing one opens with its code, line, code frame, and the nodes nearest
  * its locator, and the session then observes the screen it failed on;
  * `afterEach` waits for `close_session`; a reopened session runs the test
- * files as they are now; a promise a test left rejected fails that test
+ * files as they are now, and its actions print test lines that carry on from
+ * the test; a promise a test left rejected fails that test
  * rather than the server, before and after its close; a body its timeout cut
  * short can't drive the session; a `beforeAll` failure is the outcome, once,
  * with no screen; a screenshot baseline one session wrote passes the next; a
@@ -250,6 +251,14 @@ describe('open_session {test}', { timeout: 120_000 }, () => {
       expect(fixed.isError, fixed.text).toBe(false);
       expect(fixed.text).toMatch(/^Test "taps a button that is not there" \(tests\/counter\.e2e\.ts:\d+\) passed/);
       expect(fixed.text).toContain('status "Counter" text="2"');
+      // Test lines carry on from the test, by the ids on the screen it opened with; the test's own steps print none.
+      const increment = /#(n\d+) button "Increment"/.exec(fixed.text)?.[1];
+      const tapped = await invoke('call', { tool: 'tap', args: { target: increment } });
+      expect(tapped.text.split('\n')[1], tapped.text).toBe('Test line: await screen.getByRole("button", "Increment").tap();');
+      const drafted = await invoke('call', { tool: 'test_lines' });
+      expect(drafted.text).toContain(
+        `after test tests/counter.e2e.ts:${FAILING} stopped, in order (1 lines):\n\nawait screen.getByRole("button", "Increment").tap();\n\nPut them in that test where it stopped`,
+      );
       await invoke('close_session');
     });
 

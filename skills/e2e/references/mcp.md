@@ -77,7 +77,7 @@ The catalog, per session:
 | `tap`, `double_tap`, `long_press`, `right_click`, `hover`, `type`, `press`, `select`, `check`, `scroll`, `scroll_to`, `drag`, `upload`, `navigate`, `back`, `dismiss_keyboard` | The grammar verbs, as the testing agent gets them: `check` takes `checked`, `drag` a `to` node, `upload` project-relative `files`; `dismiss_keyboard` comes with device engines. On an engine that declares `tapModifiers`, `tap`, `double_tap`, and `right_click` take an optional `modifiers` list (`Shift`, `Control`, `Alt`, `Meta`, `ControlOrMeta`) to hold keys for the click. Each reports what changed on screen and, after its lead, the test line that repeats it (`Test line: await screen.getByRole("button", "Save").tap();`) or `No test line:` and why; `observe` shows the whole screen. A verb the engine cannot honor is not listed and fails with `UNSUPPORTED_CAPABILITY`. |
 | `type_secret` | Fills a configured secret by name: a credential's password into a password field, a `secrets` entry into any editable input; the plaintext never reaches the agent. Listed when the config declares `credentials` or `secrets` and the engine can fill secrets. |
 | `locate` | Tries a semantic locator with exactly one of `role`, `text`, `label`, `placeholder`, `testId` (`name` only with `role`; `exact` optional; anything else is `INVALID_ARGUMENT`) and returns how many nodes match, which, and the `screen.*` call to write. |
-| `test_lines` | Every test line the session's actions printed, in order, as a draft test body, starting with `await app.open();` for the session's own opening; an action without a line shows as a `//` comment. A line's locator matched the target alone on the live screen before the action (role and name first, test id last, narrowed to `{ visible: true }`, a container, or `.nth(i)` with a comment when twins share it); a fill names `credentials.user(name)` or `secrets.get(name)`, never a value; a navigation on the app's origin is written as its path. |
+| `test_lines` | Every test line the session's actions printed, in order, as a draft test body, starting with `await app.open();` for the session's own opening (after `open_session {test}`, the lines that continue that test, with no opening); an action without a line shows as a `//` comment. A line's locator matched the target alone on the live screen before the action (role and name first, test id last, narrowed to `{ visible: true }`, a container, or `.nth(i)` with a comment when twins share it); a fill names `credentials.user(name)` or `secrets.get(name)`, never a value; a navigation on the app's origin is written as its path. |
 | `screenshot` | The masked pixels as an image. |
 | `tap_at` | Taps a point (`x`, `y` in the latest screenshot's pixels): a listed control under it by id, otherwise the bare point, which an engine without a bare-point tap cannot do. Listed when the engine declares `tap` or a bare-point tap. |
 | `hover_at` | Hovers a point the same way: a listed control under it by id, otherwise the bare point. Listed when the engine declares `hover` or a bare-point hover. |
@@ -121,9 +121,10 @@ Resources: `e2e://guide` and `e2e://guide/<topic>` hold this skill.
 4. Run it from the shell: `npx e2e run tests/<feature>.e2e.ts`. On a
    failure, fix from the terminal's failure block and the trace page (topic
    `debugging`), then rerun. To see a screen the evidence leaves out, go
-   straight to it instead of walking the flow again from the start: on the
-   web, `navigate` to its path; on a device, the shortest path from the
-   launch screen. Then `observe` and `locate`.
+   straight to it instead of walking the flow again from the start:
+   `open_session {test}` stops on the failure screen (Fixing a failing
+   test); otherwise, on the web, `navigate` to its path; on a device, the
+   shortest path from the launch screen. Then `observe` and `locate`.
 5. `close_session` when you are done; an idle session closes on its own after
    30 minutes and never outlives 4 hours. When the client exits, every session
    closes and the app commands stop. To look at another project or config,
@@ -147,8 +148,10 @@ session runs the test and stops where it failed:
    The screen below it is the live screen where the test stopped.
 3. `observe` and `locate` on that screen to find the right name or the
    missing step. Then carry on from there: act out the test's next lines
-   with `call`, and `locate` each locator before you get to it, so the rerun
-   finds no second mistake. Edit the test file.
+   with `call`, so the rerun finds no second mistake. Each action prints the
+   `Test line:` that repeats it; where it differs from the test's line, use
+   the printed one. Edit the test file. `test_lines` returns the session's lines,
+   which start after the test's own.
 4. To rerun, `close_session`, then `open_session {test}` again. The session
    loads the config and the test files fresh, so it runs the edited test
    from the start and stops on the next failure, or on the final screen.

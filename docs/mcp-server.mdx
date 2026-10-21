@@ -118,6 +118,10 @@ On screen, closest to what the locator asked for:
   #n32 textbox "Full name"
 ```
 
+Each action from that screen prints its
+[test line](#how-it-writes-a-test-line). The agent puts those lines in the
+test in place of the one that failed.
+
 To rerun the edited test, the agent closes the session and opens a new one
 with the same `test`. Agent steps replay from the cache as in `e2e run`.
 See [Running a test](/reference/mcp#running-a-test) for what runs and the
