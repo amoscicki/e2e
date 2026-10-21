@@ -1,36 +1,27 @@
 /**
  * What `try_lines` may call, by receiver: the queries, actions, reads, and
  * matchers of the public test API (`types.ts`), each with the number of
- * arguments it takes. The table is closed: a name it does not list is refused
- * while the code is parsed, so the runner only ever reaches a fixture member
- * by a name listed here. The `browser` rows name the web engine's fixture by
- * its public method names; core imports nothing of the engine for them.
+ * arguments it takes. The table is closed and typed against the public
+ * interfaces: a name it does not list is refused while the code is parsed, so
+ * the runner only ever reaches a fixture member by a name listed here.
+ * Fixtures an engine contributes are not in it: core names none of their
+ * members.
  */
 
-import type { App, AsyncExpectation, Locator, Screen, ScreenExpectation } from '../types.ts';
+import type { App, AsyncExpectation, Locator, Screen } from '../types.ts';
 
 /** Something a statement can call members on. */
-export type Receiver =
-  | 'screen'
-  | 'locator'
-  | 'app'
-  | 'browser'
-  | 'keyboard'
-  | 'locator-expectation'
-  | 'screen-expectation'
-  | 'browser-expectation';
+export type Receiver = 'screen' | 'locator' | 'app' | 'locator-expectation';
 
 /** How many arguments a call takes: the fewest and the most. */
 export type Arity = readonly [min: number, max: number];
 
 /**
- * One member: a query that leads to a locator, a property that leads to
- * another receiver (`browser.keyboard`), or a call that ends the statement: an
- * action, a read whose value the result shows, or a matcher.
+ * One member: a query that leads to a locator, or a call that ends the
+ * statement: an action, a read whose value the result shows, or a matcher.
  */
 export type Member =
   | { readonly kind: 'query'; readonly args: Arity }
-  | { readonly kind: 'namespace'; readonly leads: Receiver }
   | { readonly kind: 'action'; readonly args: Arity; readonly secretValue?: true }
   | { readonly kind: 'read'; readonly args: Arity }
   | { readonly kind: 'matcher'; readonly args: Arity };
@@ -105,26 +96,7 @@ const APP = members<App>({
   restart: action(0, 0),
   clearState: action(0, 0),
   back: action(0, 0),
-  screenshot: read(0, 1),
 });
-
-const BROWSER: ReadonlyMap<string, Member> = new Map<string, Member>([
-  ['goto', action(1, 2)],
-  ['reload', action(0, 1)],
-  ['back', action(0, 1)],
-  ['forward', action(0, 1)],
-  ['url', read(0, 0)],
-  ['title', read(0, 0)],
-  ['waitForURL', action(1, 2)],
-  ['keyboard', { kind: 'namespace', leads: 'keyboard' }],
-]);
-
-const KEYBOARD: ReadonlyMap<string, Member> = new Map<string, Member>([
-  ['press', action(1, 1)],
-  ['down', action(1, 1)],
-  ['up', action(1, 1)],
-  ['type', action(1, 1)],
-]);
 
 const LOCATOR_MATCHERS = members<AsyncExpectation>({
   toBeVisible: matcher(0, 1),
@@ -142,27 +114,14 @@ const LOCATOR_MATCHERS = members<AsyncExpectation>({
   toHaveAttribute: matcher(1, 3),
   toHaveCount: matcher(1, 2),
   toHaveAccessibleName: matcher(1, 2),
-  toHaveScreenshot: matcher(0, 2),
 });
-
-const SCREEN_MATCHERS = members<ScreenExpectation>({ toHaveScreenshot: matcher(0, 2) });
-
-const BROWSER_MATCHERS: ReadonlyMap<string, Member> = new Map<string, Member>([
-  ['toHaveURL', matcher(1, 2)],
-  ['toHaveTitle', matcher(1, 2)],
-  ['toHaveClass', matcher(2, 3)],
-]);
 
 /** Every receiver's members. */
 export const SURFACE: Readonly<Record<Receiver, ReadonlyMap<string, Member>>> = {
   screen: SCREEN,
   locator: LOCATOR,
   app: APP,
-  browser: BROWSER,
-  keyboard: KEYBOARD,
   'locator-expectation': LOCATOR_MATCHERS,
-  'screen-expectation': SCREEN_MATCHERS,
-  'browser-expectation': BROWSER_MATCHERS,
 };
 
 /** A receiver as a message names it. */
@@ -170,26 +129,18 @@ export const RECEIVER_LABELS: Readonly<Record<Receiver, string>> = {
   screen: 'screen',
   locator: 'a locator',
   app: 'app',
-  browser: 'browser',
-  keyboard: 'browser.keyboard',
   'locator-expectation': 'expect(locator)',
-  'screen-expectation': 'expect(screen)',
-  'browser-expectation': 'expect(browser)',
 };
 
 /**
- * Public members `try_lines` leaves out on purpose, with why. Each would run
- * code, take a function or a selector, read files, or print where nobody reads.
+ * Public members `try_lines` leaves out on purpose, with why. Each would
+ * print where nobody reads, read files, write pixels the session withholds,
+ * or need a test file.
  */
 export const LEFT_OUT: ReadonlyMap<string, string> = new Map([
-  ['debug', 'prints to the server\'s own output; read the screen with screen.tree() or the observe tool'],
+  ['debug', "prints to the server's own output; read the screen with screen.tree() or the observe tool"],
   ['all', 'returns locators, not a result; use count() or nth(i)'],
   ['setInputFiles', 'reads files from disk; attach files with the upload tool, which checks the paths'],
-  ['locator', 'takes a CSS or XPath selector; try a semantic query such as getByRole or getByLabel'],
-  ['frameLocator', 'takes a CSS or XPath selector; try_lines reaches the top document only'],
-  ['evaluate', 'runs code in the page, which try_lines never does'],
-  ['addInitScript', 'runs code in the page, which try_lines never does'],
-  ['route', 'takes a function, which try_lines never runs'],
-  ['onDialog', 'takes a function, which try_lines never runs'],
-  ['waitForDownload', 'takes a function, which try_lines never runs'],
+  ['screenshot', 'writes an unmasked screenshot file; use the screenshot tool, which withholds pixels after a secret fill'],
+  ['toHaveScreenshot', 'compares against screenshots kept beside a test file, so it runs only in a test; look with the screenshot tool'],
 ]);

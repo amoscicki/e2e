@@ -2,16 +2,15 @@
  * The grammar `try_lines` accepts: test statements as they appear in a test
  * body, read by a tokenizer and a recursive-descent parser into data the
  * runner walks. Nothing here, or anywhere after it, evaluates the text as
- * code. A statement is an optional `await`, then a call chain on `screen`,
- * `app`, or `browser` that ends in an action or a read, or
- * `expect(<locator> | screen | browser)` with an optional `.not` and a
- * matcher. Arguments are literals (strings, numbers, booleans, `null`,
- * regular expressions, templates without `${}`), arrays and objects of them,
- * locators on `screen`, `credentials.user(name).username` as a string, and a
- * Secret (`credentials.user(name).password`, `secrets.get(name)`) as `fill`'s
- * value. Every name is checked against the closed table in `lines-surface.ts`
- * as it is read; anything else is `INVALID_ARGUMENT` naming the token and
- * where it is.
+ * code. A statement is an optional `await`, then a call chain on `screen` or
+ * `app` that ends in an action or a read, or `expect(<locator>)` with an
+ * optional `.not` and a matcher. Arguments are literals (strings, numbers,
+ * booleans, `null`, regular expressions, templates without `${}`), arrays and
+ * objects of them, locators on `screen`, `credentials.user(name).username` as
+ * a string, and a Secret (`credentials.user(name).password`,
+ * `secrets.get(name)`) as `fill`'s value. Every name is checked against the
+ * closed table in `lines-surface.ts` as it is read; anything else is
+ * `INVALID_ARGUMENT` naming the token and where it is.
  */
 
 import { ConfigurationError } from '../internal/errors.ts';
@@ -26,7 +25,7 @@ const MAX_STATEMENTS = 50;
 const MAX_DEPTH = 16;
 
 /** A fixture a statement starts from. */
-export type Root = 'screen' | 'app' | 'browser';
+export type Root = 'screen' | 'app';
 
 /** One argument, as data. */
 export type Value =
@@ -38,37 +37,34 @@ export type Value =
   | { readonly kind: 'username'; readonly credential: string }
   | { readonly kind: 'secret'; readonly from: 'credential' | 'secrets'; readonly name: string };
 
-/** One step along a chain: a call, or a property that leads to another receiver. */
-export type Link =
-  | { readonly kind: 'call'; readonly name: string; readonly args: readonly Value[] }
-  | { readonly kind: 'property'; readonly name: string };
+/** One member called along a chain. */
+export interface Call {
+  readonly name: string;
+  readonly args: readonly Value[];
+}
 
 /** A fixture and the members called on it, in order. */
 export interface Chain {
   readonly root: Root;
-  readonly links: readonly Link[];
+  readonly calls: readonly Call[];
 }
 
 /** What a statement runs. */
 export type StatementBody =
-  /** A chain whose last link is an action, or a read whose value the result shows. */
+  /** A chain whose last call is an action, or a read whose value the result shows. */
   | { readonly kind: 'call'; readonly chain: Chain; readonly read: boolean }
-  | {
-      readonly kind: 'expect';
-      readonly subject: { readonly kind: 'screen' | 'browser' } | { readonly kind: 'locator'; readonly chain: Chain };
-      readonly negated: boolean;
-      readonly matcher: { readonly name: string; readonly args: readonly Value[] };
-    };
+  /** `expect(locator)`, maybe `.not`, and one matcher. */
+  | { readonly kind: 'expect'; readonly locator: Chain; readonly negated: boolean; readonly matcher: Call };
 
 export interface Statement {
-  /** The statement as written, on one line. */
+  /** The statement as written, on one line, without its comments. */
   readonly source: string;
   readonly body: StatementBody;
 }
 
 export interface ParseOptions {
-  /** Whether the target's engine contributes the `browser` fixture. */
-  readonly browser: boolean;
+  /** The fixtures the target's engine contributes, so a statement on one is told why it is refused. */
+  readonly fixtures: readonly string[];
 }
 
 /** Parses `code` into statements, or throws `INVALID_ARGUMENT` at the first token outside the grammar. */
@@ -311,14 +307,13 @@ class Parser {
   }
 
   private statement(): Statement {
-    const first = this.peek();
-    if (isWord(first, 'await')) this.index += 1;
-    const head = this.peek();
-    const body = isWord(head, 'expect') ? this.expectStatement() : this.callStatement();
+    const first = this.index;
+    if (isWord(this.peek(), 'await')) this.index += 1;
+    const body = isWord(this.peek(), 'expect') ? this.expectStatement() : this.callStatement();
     this.requireStatementEnd();
     // The semicolon stays with the statement, so a passing line reads as it pastes.
-    const end = this.isPunctuator(';') ? this.peek().end : this.tokens[this.index - 1]!.end;
-    return { source: oneLine(this.code.slice(first.start, end)), body };
+    const last = this.isPunctuator(';') ? this.index : this.index - 1;
+    return { source: this.source(first, last), body };
   }
 
   /** A statement ends at ";", a new line, or the end of the code. */
@@ -329,20 +324,36 @@ class Parser {
     }
   }
 
-  /** `screen…`, `app…`, or `browser…`, ending in an action or a read. */
+  /**
+   * The tokens from `first` through `last` on one line: each as written, a
+   * comment or a run of whitespace between two of them one space, and none
+   * before a member call that opens a line.
+   */
+  private source(first: number, last: number): string {
+    let text = this.tokens[first]!.text;
+    for (let index = first + 1; index <= last; index += 1) {
+      const token = this.tokens[index]!;
+      const gap = this.code.slice(this.tokens[index - 1]!.end, token.start);
+      const joined = gap === '' || (token.newlineBefore && token.text === '.');
+      text += `${joined ? '' : ' '}${token.text}`;
+    }
+    return text;
+  }
+
+  /** `screen…` or `app…`, ending in an action or a read. */
   private callStatement(): StatementBody {
     const rootToken = this.peek();
-    const root = this.root(rootToken, `a statement starts with ${this.starts()}`);
-    const { links, end } = this.links(root);
+    const root = this.root(rootToken, `a statement starts with ${STARTS}`);
+    const { calls, end } = this.calls(root);
     if (end.kind === 'receiver') {
       this.requireStatementEnd();
       const ending = end.receiver === 'locator' ? 'ends on a locator' : `ends on ${RECEIVER_LABELS[end.receiver]}`;
       throw invalid(`the statement at ${where(rootToken)} ${ending}; end it with an action or a read, or wrap the locator in expect(...)`);
     }
-    return { kind: 'call', chain: { root, links }, read: end.member.kind === 'read' };
+    return { kind: 'call', chain: { root, calls }, read: end.member.kind === 'read' };
   }
 
-  /** `expect(subject)`, an optional `.not`, and one matcher. */
+  /** `expect(locator)`, an optional `.not`, and one matcher. */
   private expectStatement(): StatementBody {
     const expectToken = this.next();
     if (this.isPunctuator('.')) {
@@ -351,20 +362,16 @@ class Parser {
       throw invalid(`${name} at ${where(expectToken)} is not in the grammar; try_lines runs expect(...) itself, not expect.soft or expect.poll`);
     }
     this.punctuator('(', 'after expect');
-    const subjectToken = this.peek();
-    let subject: Extract<StatementBody, { kind: 'expect' }>['subject'];
-    let receiver: Receiver;
-    const afterSubject = this.tokens[this.index + 1];
-    if ((isWord(subjectToken, 'screen') || isWord(subjectToken, 'browser')) && afterSubject?.kind === 'punctuator' && afterSubject.text === ')') {
-      const root = this.root(subjectToken, 'expect takes a locator, screen, or browser');
-      subject = { kind: root === 'browser' ? 'browser' : 'screen' };
-      receiver = root === 'browser' ? 'browser-expectation' : 'screen-expectation';
-    } else if (isWord(subjectToken, 'screen')) {
-      subject = { kind: 'locator', chain: this.locatorChain(0) };
-      receiver = 'locator-expectation';
-    } else {
-      throw invalid(`expect takes a locator on screen, screen${this.options.browser ? ', or browser' : ''}, found ${describe(subjectToken)} at ${where(subjectToken)}`);
+    const subject = this.peek();
+    const closes = this.tokens[this.index + 1]?.kind === 'punctuator' && this.tokens[this.index + 1]?.text === ')';
+    if (isWord(subject, 'screen') && closes) {
+      throw invalid(`expect(screen) at ${where(subject)} only compares screenshots, which run in a test; look with the screenshot tool`);
     }
+    if (subject.kind === 'identifier' && this.options.fixtures.includes(subject.text)) throw this.engineFixture(subject);
+    if (!isWord(subject, 'screen')) {
+      throw invalid(`expect takes a locator on screen, found ${describe(subject)} at ${where(subject)}`);
+    }
+    const locator = this.locatorChain(0);
     this.punctuator(')', 'to close expect(');
     let negated = false;
     this.punctuator('.', 'and a matcher after expect(...)');
@@ -375,54 +382,40 @@ class Parser {
     }
     const nameToken = this.identifier('a matcher');
     if (negated && nameToken.text === 'not') throw invalid(`"not" at ${where(nameToken)}: a matcher is negated once`);
-    const member = this.member(receiver, nameToken);
-    if (member.kind !== 'matcher') throw invalid(`"${nameToken.text}" at ${where(nameToken)} is not a matcher of ${RECEIVER_LABELS[receiver]}`);
-    const args = this.call(nameToken, member.args, receiver, undefined, 0);
+    const member = this.member('locator-expectation', nameToken);
+    const args = this.call(nameToken, member.args, 'locator-expectation', undefined, 0);
     if (this.isPunctuator('.')) throw invalid(`nothing may follow the matcher; found "." at ${where(this.peek())}`);
-    return { kind: 'expect', subject, negated, matcher: { name: nameToken.text, args } };
+    return { kind: 'expect', locator, negated, matcher: { name: nameToken.text, args } };
   }
 
-  /** The statement's fixture, refused when it is not one or the target has none. */
+  /** The statement's fixture: `screen` or `app`. */
   private root(token: Token, hint: string): Root {
     if (isWord(token, 'screen') || isWord(token, 'app')) {
       this.index += 1;
       return token.text as Root;
     }
-    if (isWord(token, 'browser')) {
-      if (!this.options.browser) {
-        throw invalid(`"browser" at ${where(token)}: this target's engine contributes no browser fixture`);
-      }
-      this.index += 1;
-      return 'browser';
-    }
+    if (token.kind === 'identifier' && this.options.fixtures.includes(token.text)) throw this.engineFixture(token);
     if (token.kind === 'identifier') {
       throw invalid(`"${token.text}" at ${where(token)} is not in the grammar; ${hint}`);
     }
     throw invalid(`expected a statement, found ${describe(token)} at ${where(token)}; ${hint}`);
   }
 
-  private starts(): string {
-    return this.options.browser ? 'screen, app, browser, or expect(...)' : 'screen, app, or expect(...)';
+  /** The refusal of a fixture the target's engine contributes: core names none of its members. */
+  private engineFixture(token: Token): ConfigurationError {
+    return invalid(`"${token.text}" at ${where(token)} is a fixture of this target's engine, which try_lines does not run; a statement starts with ${STARTS}`);
   }
 
-  /** The members called along a chain, checked against the receiver each one is called on. */
-  private links(root: Receiver, depth = 0): { links: Link[]; end: ChainEnd } {
-    const links: Link[] = [];
+  /** The members called along a chain, each checked against the receiver it is called on. */
+  private calls(root: Receiver, depth = 0): { calls: Call[]; end: ChainEnd } {
+    const calls: Call[] = [];
     let receiver = root;
     while (this.isPunctuator('.')) {
       this.index += 1;
       const nameToken = this.identifier(`a member of ${RECEIVER_LABELS[receiver]}`);
       const member = this.member(receiver, nameToken);
-      if (member.kind === 'namespace') {
-        if (this.isPunctuator('(')) {
-          throw invalid(`"${nameToken.text}" at ${where(nameToken)} is not a method; call a member of ${RECEIVER_LABELS[member.leads]}`);
-        }
-        links.push({ kind: 'property', name: nameToken.text });
-        receiver = member.leads;
-        continue;
-      }
       const secretValue = member.kind === 'action' && member.secretValue === true ? 0 : undefined;
-      links.push({ kind: 'call', name: nameToken.text, args: this.call(nameToken, member.args, receiver, secretValue, depth) });
+      calls.push({ name: nameToken.text, args: this.call(nameToken, member.args, receiver, secretValue, depth) });
       if (member.kind === 'query') {
         receiver = 'locator';
         continue;
@@ -430,23 +423,23 @@ class Parser {
       if (this.isPunctuator('.')) {
         throw invalid(`nothing may follow ${nameToken.text}(...); found "." at ${where(this.peek())}`);
       }
-      return { links, end: { kind: 'ended', member } };
+      return { calls, end: { kind: 'ended', member } };
     }
-    return { links, end: { kind: 'receiver', receiver } };
+    return { calls, end: { kind: 'receiver', receiver } };
   }
 
   /** A locator: `screen` and at least one query, with nothing called on its match. */
   private locatorChain(depth: number): Chain {
     const start = this.peek();
     this.word('screen', 'a locator on screen');
-    const { links, end } = this.links('screen', depth);
+    const { calls, end } = this.calls('screen', depth);
     if (end.kind === 'ended') {
       throw invalid(`the locator at ${where(start)} ends in a call; pass the locator itself, such as screen.getByText('Done')`);
     }
     if (end.receiver !== 'locator') {
       throw invalid(`the argument at ${where(start)} is screen itself; pass a locator, such as screen.getByText('Done')`);
     }
-    return { root: 'screen', links };
+    return { root: 'screen', calls };
   }
 
   /** The member `nameToken` names on `receiver`, or a refusal that says what it may name instead. */
@@ -457,7 +450,7 @@ class Parser {
     const label = RECEIVER_LABELS[receiver];
     const leftOut = LEFT_OUT.get(nameToken.text);
     if (leftOut !== undefined) throw invalid(`"${nameToken.text}" at ${where(nameToken)} is left out of try_lines: it ${leftOut}`);
-    if (!receiver.endsWith('-expectation') && MATCHERS.has(nameToken.text)) {
+    if (receiver !== 'locator-expectation' && SURFACE['locator-expectation'].has(nameToken.text)) {
       throw invalid(`"${nameToken.text}" at ${where(nameToken)} is a matcher; call it on expect(...)`);
     }
     const names = [...members.keys()];
@@ -648,10 +641,7 @@ class Parser {
   }
 }
 
-/** Every matcher name, so one called off `expect` is named as a matcher. */
-const MATCHERS: ReadonlySet<string> = new Set(
-  (['locator-expectation', 'screen-expectation', 'browser-expectation'] as const).flatMap((receiver) => [...SURFACE[receiver].keys()]),
-);
+const STARTS = 'screen, app, or expect(...)';
 
 const ARGUMENTS =
   "an argument is a string, number, boolean, null, regular expression, array, or object, a locator on screen, credentials.user('name').username, or a secret as fill's value";
@@ -673,9 +663,4 @@ function describe(token: Token): string {
   if (token.kind === 'end') return 'the end of the code';
   const text = token.text.length > 40 ? `${token.text.slice(0, 39)}…` : token.text;
   return JSON.stringify(text);
-}
-
-/** A statement written over several lines, joined onto one: a line that opens with a member call joins without a space. */
-function oneLine(source: string): string {
-  return source.replace(/\s*\n\s*(?=\.)/g, '').replace(/\s*\n\s*/g, ' ');
 }

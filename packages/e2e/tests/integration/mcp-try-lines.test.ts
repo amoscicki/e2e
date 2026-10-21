@@ -91,15 +91,12 @@ await screen.getByRole('status', 'Counter').textContent();
 await screen.getByLabel('Plan').selectOption('Pro');
 await expect(screen.getByLabel('Plan')).toHaveValue('pro');
 await expect(screen.getByText('Late arrival')).toBeVisible();
-await screen.getByTestId('item').allTextContents();
-await expect(browser).toHaveURL('/');
-await browser.title();`);
+await screen.getByTestId('item').allTextContents();`);
     expect(tried.isError, tried.text).toBe(false);
-    expect(tried.text).toContain('All 10 statements passed.\n');
+    expect(tried.text).toContain('All 8 statements passed.\n');
     expect(tried.text).toContain("1. passed: await app.open('/');\n");
     expect(tried.text).toContain("4. passed: await screen.getByRole('status', 'Counter').textContent();\n   returned \"1\"\n");
     expect(tried.text).toContain('   returned ["Item Alpha","Item Beta","Item Gamma"]\n');
-    expect(tried.text).toContain('10. passed: await browser.title();\n   returned "Fixture Home"');
     expect(tried.text).toMatch(/\n\n(?:Screen changes since revision|The screen changed substantially)/);
     expect(tried.text).toContain('status "Counter" text="1"');
 
@@ -134,9 +131,11 @@ await screen.getByRole('button', 'Increment').tap();`,
   it('refuses code outside the grammar before running any of it', async () => {
     const refused = await tryLines("await screen.getByRole('button', 'Increment').tap();\nprocess.exit(1);");
     expect(refused.isError).toBe(true);
-    expect(refused.text).toBe('INVALID_ARGUMENT: try_lines: "process" at 2:1 is not in the grammar; a statement starts with screen, app, browser, or expect(...)');
+    expect(refused.text).toBe('INVALID_ARGUMENT: try_lines: "process" at 2:1 is not in the grammar; a statement starts with screen, app, or expect(...)');
     const evaluated = await tryLines("await browser.evaluate('document.title')");
-    expect(evaluated.text).toBe('INVALID_ARGUMENT: try_lines: "evaluate" at 1:15 is left out of try_lines: it runs code in the page, which try_lines never does');
+    expect(evaluated.text).toBe(
+      'INVALID_ARGUMENT: try_lines: "browser" at 1:7 is a fixture of this target\'s engine, which try_lines does not run; a statement starts with screen, app, or expect(...)',
+    );
     const unchanged = await tryLines("await expect(screen.getByRole('status', 'Counter')).toHaveText('2')", 300);
     expect(unchanged.isError, unchanged.text).toBe(false);
   });
@@ -189,6 +188,33 @@ await expect(screen.getByTestId('plain')).toHaveText('nothing yet');`, 300);
       expect(echoed.text).toContain('returned ["<secret:apiKey>"]');
       expect(echoed.text).toContain('6. failed:');
       expect(echoed.text).toContain('observed: text "<secret:apiKey>"');
+    });
+
+    it('refuses a partial match while a secret value is on screen, so no pass or fail spells it out', async () => {
+      // The secret from the test before is still in the Token field and its echoes.
+      for (const code of [
+        "await screen.getByDisplayValue(/^sk-l/).count();",
+        "await expect(screen.getByTestId('plain')).toContainText('sk-live');",
+        "await screen.getByText('sk-l', { exact: false }).count();",
+        "await screen.getByTestId('plain').filter({ hasText: 'sk-l' }).count();",
+      ]) {
+        const probed = await tryLines(code);
+        expect(probed.isError, code).toBe(true);
+        expect(probed.text, code).toContain('POLICY_DENIED: a secret value is on screen (observe shows <secret:name> where it is) and this statement matches part of a text, so it did not run');
+        expect(probed.text, code).not.toContain('returned');
+      }
+      const exact = await tryLines("await screen.getByDisplayValue('sk-live-WRONG').count();");
+      expect(exact.isError, exact.text).toBe(false);
+      expect(exact.text).toContain('returned 0');
+
+      // A partial match that puts a secret on screen ran, and its outcome is withheld.
+      const fresh = await tryLines(`await app.open('/echo');
+await screen.getByRole('textbox', { name: /Token/ }).fill(secrets.get('apiKey'));
+await screen.getByLabel('Note').fill('after');`);
+      expect(fresh.isError).toBe(true);
+      expect(fresh.text).toContain('Statement 2 of 3 failed');
+      expect(fresh.text).toContain('so it ran, and its outcome is withheld');
+      expect(fresh.text).toContain('3. not run:');
     });
 
     it('never returns a secret value', () => {

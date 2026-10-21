@@ -8,10 +8,12 @@
  * first failure, each with its wait capped at the call's `timeout`, and the
  * result ends with what changed on screen.
  *
- * The coding agent is not trusted with a fill the way a test is: a Secret
- * reaches the screen only through the authorization `type_secret` runs, on
- * the node the fill lands on. Reads come back through the attempt's secret
- * ledger, and the session's result redaction covers the rest.
+ * The coding agent is not trusted the way test code is. A Secret reaches the
+ * screen only through the authorization `type_secret` runs, on the node the
+ * fill lands on. Reads come back through the attempt's secret ledger, and the
+ * session's result redaction covers the rest. While a secret value shows on
+ * screen, a statement that matches part of a text is refused, since its pass
+ * or fail would tell the value apart a piece at a time.
  */
 
 import type { ToolExecutionOptions, ToolSet } from 'ai';
@@ -29,22 +31,24 @@ import { locatorInternals } from '../locator/screen.ts';
 import type { AttemptBudget } from '../run/budget.ts';
 import { secretHandle } from '../secrets.ts';
 import type { ActionOptions, Secret, TestFixtures } from '../types.ts';
-import { parseLines, type Chain, type Root, type Statement, type Value } from './lines-parse.ts';
+import { parseLines, type Call, type Chain, type Statement, type Value } from './lines-parse.ts';
 
 /** How long one statement may wait unless the call says otherwise, in milliseconds. */
 const TRY_LINES_TIMEOUT_MS = 5_000;
 /** The longest a call may let one statement wait. */
 const MAX_TIMEOUT_MS = 120_000;
+/** What the secret ledger leaves where a value was. */
+const SECRET_MARKER = '<secret:';
 
 export interface TryLinesOptions {
   /** The session attempt's fixtures, the ones a test body gets. */
   readonly fixtures: TestFixtures;
+  /** The fixtures the target's engine contributes, which `try_lines` names in a refusal and never runs. */
+  readonly engineFixtures: readonly string[];
   /** The attempt's agent runtime: its config, secret resolver, ledger, and pixel exposure. */
   readonly runtime: AgentContext;
   /** The attempt's budget, capped per statement. */
   readonly budget: AttemptBudget;
-  /** Whether the target's engine contributes the `browser` fixture. */
-  readonly browser: boolean;
   /** The session step, observed once the statements ran. */
   readonly context: StepExecutorContext;
   /** The session's presenter, so the screen comes back as changes since the one the agent holds. */
@@ -74,11 +78,12 @@ export function tryLinesTool(options: TryLinesOptions): ToolSet[string] {
     description: [
       'Try test lines against the live session before writing them into a test.',
       "Pass statements as they appear in a test body, such as await screen.getByLabel('Email').fill('ada@example.com'); await expect(screen.getByRole('status')).toHaveText('Saved').",
-      "They run in order on the session's fixtures with the test API's own waiting, exactly-one rule, and matchers, and stop at the first failure.",
+      "They run in order on the session's screen and app fixtures with the test API's own waiting, exactly-one rule, and matchers, and stop at the first failure.",
       `The result gives each statement's pass or failure (code and message) and a read's value, then what changed on screen. Each statement waits at most timeout ms (default ${String(TRY_LINES_TIMEOUT_MS)}).`,
-      `The code is parsed, never run as JavaScript: a statement starts with screen, app, ${options.browser ? 'browser, ' : ''}or expect(locator | screen${options.browser ? ' | browser' : ''}), chains getBy* queries, filter, first, last, and nth, and ends in an action, a read, or a matcher.`,
+      'The code is parsed, never run as JavaScript: a statement starts with screen, app, or expect(locator), chains getBy* queries, filter, first, last, and nth, and ends in an action, a read, or a matcher.',
       "Arguments are literals, regular expressions, arrays, objects, locators on screen, and credentials.user('name').username.",
       "credentials.user('name').password and secrets.get('name') are accepted only as fill's value, and fill only where type_secret would.",
+      'While a secret value shows on screen, a regular expression, exact: false, toContainText, or a hasText filter is refused with POLICY_DENIED; match the whole text instead.',
     ].join(' '),
     inputSchema: z.object({
       code: z.string().min(1).describe('One or more test statements, separated by ";" or new lines'),
@@ -97,18 +102,15 @@ export function tryLinesTool(options: TryLinesOptions): ToolSet[string] {
 
 /** Parses the code, runs its statements until one fails, and renders what happened. */
 async function tryLines(options: TryLinesOptions, args: TryLinesArgs, signal: AbortSignal | undefined): Promise<TriedLines> {
-  const statements = parseLines(args.code, { browser: options.browser });
+  const statements = parseLines(args.code, { fixtures: options.engineFixtures });
   const timeout = args.timeout ?? TRY_LINES_TIMEOUT_MS;
   const runner = new LineRunner(options);
   const outcomes: Outcome[] = [];
   for (const statement of statements) {
     if (signal?.aborted === true) break;
-    try {
-      outcomes.push({ statement, value: await options.budget.capped(timeout, () => runner.run(statement)) });
-    } catch (cause) {
-      outcomes.push({ statement, error: classifyError(cause) });
-      break;
-    }
+    const outcome = await tryStatement(options, runner, statement, timeout);
+    outcomes.push(outcome);
+    if ('error' in outcome) break;
   }
   let screen: string;
   try {
@@ -118,6 +120,77 @@ async function tryLines(options: TryLinesOptions, args: TryLinesArgs, signal: Ab
   }
   const failed = outcomes.some((outcome) => 'error' in outcome);
   return { text: render(statements, outcomes, timeout, options.runtime.redact, screen), failed };
+}
+
+/**
+ * Runs one statement under the call's cap. A statement that matches part of
+ * a text is refused while a secret value shows on screen, and its outcome is
+ * withheld when one shows once it ran: either way its pass or fail would say
+ * whether that part of the value is on screen.
+ */
+async function tryStatement(options: TryLinesOptions, runner: LineRunner, statement: Statement, timeout: number): Promise<Outcome> {
+  const partial = matchesPart(statement);
+  try {
+    if (partial && (await secretOnScreen(options.context))) {
+      throw partialMatchDenied('it did not run');
+    }
+    const settled = await options.budget.capped(timeout, () => runner.run(statement)).then(
+      (value: unknown) => ({ value }),
+      (cause: unknown) => ({ cause }),
+    );
+    if (partial && (await secretOnScreen(options.context))) {
+      throw partialMatchDenied('it ran, and its outcome is withheld');
+    }
+    if ('cause' in settled) throw settled.cause;
+    return { statement, value: settled.value };
+  } catch (cause) {
+    return { statement, error: classifyError(cause) };
+  }
+}
+
+/** Whether the redacted screen shows where a secret value is. */
+async function secretOnScreen(context: StepExecutorContext): Promise<boolean> {
+  return (await context.observe()).text.includes(SECRET_MARKER);
+}
+
+function partialMatchDenied(what: string): ConfigurationError {
+  return new ConfigurationError(
+    'POLICY_DENIED',
+    `a secret value is on screen (observe shows ${SECRET_MARKER}name> where it is) and this statement matches part of a text, so ${what}: its pass or fail would tell the value apart a piece at a time. Match the whole text instead, without a regular expression, exact: false, toContainText, or a hasText filter.`,
+  );
+}
+
+/**
+ * Whether a statement matches part of a text: a regular expression,
+ * `exact: false`, `toContainText`, or a `hasText` filter, which matches a
+ * substring. An exact match only ever confirms a whole value.
+ */
+function matchesPart(statement: Statement): boolean {
+  const { body } = statement;
+  const calls = body.kind === 'call' ? body.chain.calls : [...body.locator.calls, body.matcher];
+  return calls.some(callMatchesPart);
+}
+
+function callMatchesPart(call: Call): boolean {
+  return call.name === 'toContainText' || call.args.some((arg) => valueMatchesPart(arg, undefined));
+}
+
+function valueMatchesPart(value: Value, key: string | undefined): boolean {
+  switch (value.kind) {
+    case 'regex':
+      return true;
+    case 'literal':
+      return (key === 'exact' && value.value === false) || (key === 'hasText' && typeof value.value === 'string');
+    case 'array':
+      return value.items.some((item) => valueMatchesPart(item, undefined));
+    case 'object':
+      return value.entries.some(([entry, item]) => valueMatchesPart(item, entry));
+    case 'locator':
+      return value.chain.calls.some(callMatchesPart);
+    case 'username':
+    case 'secret':
+      return false;
+  }
 }
 
 /** Runs parsed statements on the session's fixtures. */
@@ -130,51 +203,32 @@ class LineRunner {
       const value: unknown = await this.chain(body.chain);
       return body.read ? value : undefined;
     }
-    const subject = body.subject.kind === 'locator' ? this.chain(body.subject.chain) : this.root(body.subject.kind);
-    const expectation: unknown = expect(subject as never);
+    const expectation: unknown = expect(this.chain(body.locator) as never);
     const matchers: unknown = body.negated ? Reflect.get(expectation as object, 'not') : expectation;
-    await this.invoke(matchers, body.matcher.name, body.matcher.args.map((arg) => this.value(arg)));
+    await this.invoke(matchers, body.matcher);
     return undefined;
   }
 
-  /** A fixture the grammar starts from; `browser` only reaches here on a target whose engine contributes it. */
-  private root(root: Root): unknown {
-    const { fixtures } = this.options;
-    switch (root) {
-      case 'screen':
-        return fixtures.screen;
-      case 'app':
-        return fixtures.app;
-      case 'browser':
-        return Reflect.get(fixtures, 'browser');
-    }
-  }
-
-  /** Walks a chain: a query returns its locator at once, the last call its promise. */
+  /** Walks a chain from its fixture: a query returns its locator at once, the last call its promise. */
   private chain(chain: Chain): unknown {
-    let receiver = this.root(chain.root);
-    for (const link of chain.links) {
-      if (link.kind === 'property') {
-        receiver = Reflect.get(receiver as object, link.name);
-        continue;
-      }
-      const [first, second] = link.args;
-      if (link.name === 'fill' && first?.kind === 'secret') {
-        receiver = this.fillSecret(receiver, this.secret(first), second === undefined ? undefined : this.value(second));
-        continue;
-      }
-      receiver = this.invoke(receiver, link.name, link.args.map((arg) => this.value(arg)));
+    let receiver: unknown = chain.root === 'screen' ? this.options.fixtures.screen : this.options.fixtures.app;
+    for (const call of chain.calls) {
+      const [first, second] = call.args;
+      receiver =
+        call.name === 'fill' && first?.kind === 'secret'
+          ? this.fillSecret(receiver, this.secret(first), second === undefined ? undefined : this.value(second))
+          : this.invoke(receiver, call);
     }
     return receiver;
   }
 
   /** Calls a member the grammar's table listed by this name, on the object it was listed for. */
-  private invoke(receiver: unknown, name: string, args: readonly unknown[]): unknown {
-    const method: unknown = Reflect.get(receiver as object, name);
+  private invoke(receiver: unknown, call: Call): unknown {
+    const method: unknown = Reflect.get(receiver as object, call.name);
     if (typeof method !== 'function') {
-      throw new ConfigurationError('UNSUPPORTED_CAPABILITY', `${name} is not available on this target`);
+      throw new ConfigurationError('UNSUPPORTED_CAPABILITY', `${call.name} is not available on this target`);
     }
-    return Reflect.apply(method, receiver, args);
+    return Reflect.apply(method, receiver, call.args.map((arg) => this.value(arg)));
   }
 
   /** An argument as the fixture receives it; a Secret stays a handle and goes through `fillSecret` only. */

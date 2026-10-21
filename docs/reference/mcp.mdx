@@ -243,9 +243,8 @@ call {tool: "try_lines", args: {code: "await screen.getByLabel('Email').fill('ad
 | `code` | One or more statements as a test body writes them, separated by `;` or new lines. |
 | `timeout` | Optional. How long each statement may wait, in ms, 1 through 120000. Default `5000`. |
 
-- Statements run in order on the session's `screen` and `app` fixtures, and
-  `browser` on a web target, with a test's waits, exactly-one rule, and
-  matchers.
+- Statements run in order on the session's `screen` and `app` fixtures, with
+  a test's waits, exactly-one rule, and matchers.
 - The first failure stops the call: the rest don't run, the app stays where
   the passing statements left it, and the result is an error result with the
   code and message a test would get.
@@ -258,26 +257,32 @@ The code is parsed, never run as JavaScript. The grammar takes:
 
 | Part | Accepted |
 | --- | --- |
-| Statement | An optional `await`, then a chain on `screen`, `app`, or `browser` that ends in an action or a read, or `expect(locator \| screen \| browser)` with an optional `.not` and one matcher |
+| Statement | An optional `await`, then a chain on `screen` or `app` that ends in an action or a read, or `expect(locator)` with an optional `.not` and one matcher |
 | Locator | `screen.getByRole`, `getByLabel`, `getByText`, `getByPlaceholder`, `getByTestId`, or `getByDisplayValue`, narrowed with `filter`, `first`, `last`, `nth`, and more `getBy*` |
-| `browser` | `goto`, `reload`, `back`, `forward`, `url`, `title`, `waitForURL`, and `keyboard.press`, `down`, `up`, `type` |
 | Argument | A string, number, boolean, `null`, regular expression, template without `${}`, array, object, locator, or `credentials.user(name).username` |
 | Secret | `credentials.user(name).password` or `secrets.get(name)`, as `fill`'s value only |
 
-`screen.debug`, `all`, `setInputFiles`, `browser.locator`, `frameLocator`,
-`evaluate`, `addInitScript`, `route`, `onDialog`, `waitForDownload`, and the
-value matchers (`toBe`, `toEqual`) are left out.
+Left out: fixtures an engine contributes (`browser`, `device`),
+`expect(screen)`, `toHaveScreenshot`, `app.screenshot`, `screen.debug`,
+`all`, `setInputFiles`, and the value matchers (`toBe`, `toEqual`).
 
 | Throws | When |
 | --- | --- |
 | `INVALID_ARGUMENT` | Code outside the grammar, such as another name, a call it lacks, an assignment, or a function. The message names the token with its line and column, and no statement runs. |
+| `POLICY_DENIED` | A secret `fill` into a field `type_secret` would refuse, a read of a password field, or a partial match while a secret value shows on screen. |
 
 A secret `fill` passes the checks `type_secret` runs, on the field it lands
 on: a configured secret, an enabled editable field, and a password field for
-a password. A field that fails them is `POLICY_DENIED`, and nothing is typed.
-Reads return text through the secret ledger, reading a password field stays
-`POLICY_DENIED`, and a filled secret withholds screenshots as `type_secret`
-does.
+a password. A field that fails them gets nothing typed. Reads return text
+through the secret ledger, and a filled secret withholds screenshots as
+`type_secret` does.
+
+While a secret value shows on screen (`observe` shows `<secret:name>`), a
+statement that matches part of a text doesn't run: a regular expression,
+`exact: false`, `toContainText`, or a `hasText` filter. Its pass or fail
+would spell the value out one piece at a time. A statement that puts a
+secret on screen this way runs, and its outcome is withheld. Match the whole
+text instead.
 
 #### `test_lines`
 
