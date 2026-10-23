@@ -71,7 +71,7 @@ interface RunCodeArgs {
 }
 
 /** The rendered result, and whether a statement failed. */
-interface TriedLines {
+interface RunCodeResult {
   readonly text: string;
   readonly failed: boolean;
 }
@@ -89,7 +89,7 @@ export function runCodeTool(options: RunCodeOptions): ToolSet[string] {
       "They run in order on the session's screen and app with the test API's own waiting, exactly-one rule, and matchers, and stop at the first failure.",
       `The result gives each statement's pass or failure (code and message) and a read's value, then what changed on screen. Each statement waits at most timeout ms (default ${String(RUN_CODE_TIMEOUT_MS)}).`,
       "Statements that pass, except reads, join test_lines' draft in the order they ran.",
-      'The code is parsed, never evaluated as JavaScript: a statement starts with screen, app, or expect(locator), chains getBy* queries, filter, first, last, and nth, and ends in an action, a read, or a matcher.',
+      'The code is parsed, never evaluated as JavaScript: a statement starts with screen, app, or expect(locator), chains getBy* queries, filter, or, first, last, and nth, and ends in an action, a read, or a matcher.',
       "Arguments are literals, regular expressions, arrays, objects, locators on screen, and credentials.user('name').username.",
       "credentials.user('name').password and secrets.get('name') are accepted only as fill's value, and fill only where type_secret would.",
       'Reads and matchers see <secret:name> where a secret value is. When the project configures secrets, find locators by their exact text: a regular expression, exact: false, or hasText in a query is refused with POLICY_DENIED.',
@@ -105,12 +105,12 @@ export function runCodeTool(options: RunCodeOptions): ToolSet[string] {
         .describe(`How long each statement may wait, in milliseconds; default ${String(RUN_CODE_TIMEOUT_MS)}`),
     }).strict(),
     execute: (args: RunCodeArgs, call: ToolExecutionOptions<unknown>) => runCode(options, runner, args, call.abortSignal),
-    toModelOutput: ({ output }: { readonly output: TriedLines }) => ({ type: output.failed ? ('error-text' as const) : ('text' as const), value: output.text }),
+    toModelOutput: ({ output }: { readonly output: RunCodeResult }) => ({ type: output.failed ? ('error-text' as const) : ('text' as const), value: output.text }),
   };
 }
 
 /** Parses the code, runs its statements until one fails, and renders what happened. */
-async function runCode(options: RunCodeOptions, runner: LineRunner, args: RunCodeArgs, signal: AbortSignal | undefined): Promise<TriedLines> {
+async function runCode(options: RunCodeOptions, runner: LineRunner, args: RunCodeArgs, signal: AbortSignal | undefined): Promise<RunCodeResult> {
   const statements = parseCode(args.code, { fixtures: options.engineFixtures });
   const { agentRuntime: runtime, budget } = options.attempt;
   refuseMarkerExpectations(statements);

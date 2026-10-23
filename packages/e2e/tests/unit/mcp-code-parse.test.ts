@@ -15,7 +15,7 @@ const ARGUMENTS =
   "an argument is a string, number, boolean, null, regular expression, array, or object, a locator on screen, credentials.user('name').username, or a secret as fill's value";
 const STATEMENTS = 'a statement starts with screen, app, or expect(...)';
 const LOCATOR_MEMBERS =
-  'getByRole, getByLabel, getByPlaceholder, getByText, getByDisplayValue, getByTestId, tapAt, swipe, scrollUntilVisible, filter, first, last, nth, tap, click, doubleTap, dblclick, secondaryTap, longPress, fill, pressSequentially, clear, press, check, uncheck, selectOption, focus, hover, dragTo, scrollIntoView, waitFor, textContent, inputValue, getAttribute, isVisible, isHidden, isEnabled, isDisabled, isChecked, boundingBox, count, allTextContents';
+  'getByRole, getByLabel, getByPlaceholder, getByText, getByDisplayValue, getByTestId, tapAt, swipe, scrollUntilVisible, filter, or, first, last, nth, tap, click, doubleTap, dblclick, secondaryTap, longPress, fill, pressSequentially, clear, press, check, uncheck, selectOption, focus, hover, dragTo, scrollIntoView, waitFor, textContent, inputValue, getAttribute, isVisible, isHidden, isEnabled, isDisabled, isChecked, boundingBox, count, allTextContents';
 const NESTED = 'repeats a group that repeats or alternates inside, which can run for hours on a short text; repeat a single character or class instead';
 const SECRET_PLACE = "is accepted only as fill's value, such as screen.getByLabel('Password').fill(credentials.user('admin').password)";
 
@@ -127,6 +127,21 @@ await screen.getByRole('textbox', { name: 'Notes', exact: null, level: [1, false
           { name: 'press' },
         ],
       },
+    });
+  });
+
+  it('or between two locators, the second as a locator argument', () => {
+    const [either] = parseCode("await expect(screen.getByRole('button', 'Save').or(screen.getByRole('button', 'Submit')).first()).toBeVisible();", WEB);
+    expect(either!.body).toMatchObject({
+      kind: 'expect',
+      locator: {
+        calls: [
+          { name: 'getByRole' },
+          { name: 'or', args: [{ kind: 'locator', chain: { root: 'screen', calls: [{ name: 'getByRole', args: [{ value: 'button' }, { value: 'Submit' }] }] } }] },
+          { name: 'first' },
+        ],
+      },
+      matcher: { name: 'toBeVisible' },
     });
   });
 

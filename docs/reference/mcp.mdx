@@ -263,7 +263,7 @@ The code is parsed, never run as JavaScript. The grammar takes:
 | Part | Accepted |
 | --- | --- |
 | Statement | An optional `await`, then a chain on `screen` or `app` that ends in an action or a read, or `expect(locator)` with an optional `.not` and one matcher |
-| Locator | `screen.getByRole`, `getByLabel`, `getByText`, `getByPlaceholder`, `getByTestId`, or `getByDisplayValue`, narrowed with `filter`, `first`, `last`, `nth`, and more `getBy*` |
+| Locator | `screen.getByRole`, `getByLabel`, `getByText`, `getByPlaceholder`, `getByTestId`, or `getByDisplayValue`, narrowed with `filter`, `or`, `first`, `last`, `nth`, and more `getBy*` |
 | Argument | A string, number, boolean, `null`, regular expression, template without `${}`, array, object, locator, or `credentials.user(name).username` |
 | Secret | `credentials.user(name).password` or `secrets.get(name)`, as `fill`'s value only |
 

@@ -2,8 +2,10 @@
  * What `run_code` may call, by receiver: the queries, actions, reads, and
  * matchers of the public test API (`types.ts`), each with the number of
  * arguments it takes. The table is closed and typed against the public
- * interfaces: a name it does not list is refused while the code is parsed, so
- * the runner only ever reaches a fixture member by a name listed here.
+ * interfaces, in both directions: a name it does not list is refused while the
+ * code is parsed, so the runner only ever reaches a fixture member by a name
+ * listed here, and a public member it neither lists nor leaves out fails to
+ * compile.
  * Fixtures an engine contributes are not in it: core names none of their
  * members.
  */
@@ -31,8 +33,22 @@ const action = (min: number, max: number): Member => ({ kind: 'action', args: [m
 const read = (min: number, max: number): Member => ({ kind: 'read', args: [min, max] });
 const matcher = (min: number, max: number): Member => ({ kind: 'matcher', args: [min, max] });
 
-/** Members named after a public interface, so a name the interface lacks fails to compile. */
-function members<T>(entries: { readonly [K in keyof T & string]?: Member }): ReadonlyMap<string, Member> {
+/** Public members `run_code` leaves out on purpose; `LEFT_OUT` says why for each. */
+type LeftOutName = 'debug' | 'all' | 'setInputFiles' | 'screenshot' | 'toHaveScreenshot';
+
+/** Public members that are not calls: `expect(...).not` the grammar reads itself, `app.baseUrl` a statement has no use for. */
+type NotCalled = 'not' | 'baseUrl';
+
+/**
+ * A receiver's table: every public member of `T` listed, unless it is left out
+ * on purpose or not a call, and no name `T` lacks. A member the API gains then
+ * fails to compile here until it is listed or left out with a reason.
+ */
+type Covers<T> = { readonly [K in Exclude<keyof T & string, LeftOutName | NotCalled>]: Member } & {
+  readonly [K in keyof T & string]?: Member;
+};
+
+function members(entries: Readonly<Record<string, Member | undefined>>): ReadonlyMap<string, Member> {
   return new Map(Object.entries(entries).filter((entry): entry is [string, Member] => entry[1] !== undefined));
 }
 
@@ -51,12 +67,13 @@ const SCREEN_ACTIONS = {
   scrollUntilVisible: action(1, 2),
 } as const satisfies { readonly [K in keyof Screen]?: Member };
 
-const SCREEN = members<Screen>({ ...QUERIES, ...SCREEN_ACTIONS, tree: read(0, 1) });
+const SCREEN = members({ ...QUERIES, ...SCREEN_ACTIONS, tree: read(0, 1) } satisfies Covers<Screen>);
 
-const LOCATOR = members<Locator>({
+const LOCATOR = members({
   ...QUERIES,
   ...SCREEN_ACTIONS,
   filter: query(1, 1),
+  or: query(1, 1),
   first: query(0, 0),
   last: query(0, 0),
   nth: query(1, 1),
@@ -89,16 +106,16 @@ const LOCATOR = members<Locator>({
   boundingBox: read(0, 0),
   count: read(0, 0),
   allTextContents: read(0, 0),
-});
+} satisfies Covers<Locator>);
 
-const APP = members<App>({
+const APP = members({
   open: action(0, 1),
   restart: action(0, 0),
   clearState: action(0, 0),
   back: action(0, 0),
-});
+} satisfies Covers<App>);
 
-const LOCATOR_MATCHERS = members<AsyncExpectation>({
+const LOCATOR_MATCHERS = members({
   toBeVisible: matcher(0, 1),
   toBeHidden: matcher(0, 1),
   toBeAttached: matcher(0, 1),
@@ -114,7 +131,7 @@ const LOCATOR_MATCHERS = members<AsyncExpectation>({
   toHaveAttribute: matcher(1, 3),
   toHaveCount: matcher(1, 2),
   toHaveAccessibleName: matcher(1, 2),
-});
+} satisfies Covers<AsyncExpectation>);
 
 /** Every receiver's members. */
 export const SURFACE: Readonly<Record<Receiver, ReadonlyMap<string, Member>>> = {
@@ -137,10 +154,12 @@ export const RECEIVER_LABELS: Readonly<Record<Receiver, string>> = {
  * print where nobody reads, read files, write pixels the session withholds,
  * or need a test file.
  */
-export const LEFT_OUT: ReadonlyMap<string, string> = new Map([
-  ['debug', "prints to the server's own output; read the screen with screen.tree() or the observe tool"],
-  ['all', 'returns locators, not a result; use count() or nth(i)'],
-  ['setInputFiles', 'reads files from disk; attach files with the upload tool, which checks the paths'],
-  ['screenshot', 'writes an unmasked screenshot file; use the screenshot tool, which withholds pixels after a secret fill'],
-  ['toHaveScreenshot', 'compares against screenshots kept beside a test file, so it runs only in a test; look with the screenshot tool'],
-]);
+export const LEFT_OUT: ReadonlyMap<string, string> = new Map(
+  Object.entries({
+    debug: "prints to the server's own output; read the screen with screen.tree() or the observe tool",
+    all: 'returns locators, not a result; use count() or nth(i)',
+    setInputFiles: 'reads files from disk; attach files with the upload tool, which checks the paths',
+    screenshot: 'writes an unmasked screenshot file; use the screenshot tool, which withholds pixels after a secret fill',
+    toHaveScreenshot: 'compares against screenshots kept beside a test file, so it runs only in a test; look with the screenshot tool',
+  } satisfies Record<LeftOutName, string>),
+);

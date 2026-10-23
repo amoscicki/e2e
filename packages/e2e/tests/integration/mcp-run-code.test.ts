@@ -22,7 +22,7 @@ const PACKAGE_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const CLI = path.join(PACKAGE_ROOT, 'dist', 'cli', 'bin.js');
 
 const PASSWORD = 'admin-pass-7Qz';
-const API_KEY = 'sk-live-TRYLINES-0000';
+const API_KEY = 'sk-live-RUNCODE-0000';
 
 const CONFIG = `import type { E2EConfig } from 'e2e';
 import { web } from '@e2e-dev/web';
@@ -91,7 +91,7 @@ describe('e2e mcp run_code', { timeout: 120_000 }, () => {
   });
 
   it("runs a block on the session's fixtures with the test API's semantics, shows reads, and reports what changed", async () => {
-    const tried = await runCode(`await app.open('/');
+    const result = await runCode(`await app.open('/');
 await screen.getByRole('button', 'Increment').tap();
 await expect(screen.getByRole('status', 'Counter')).toHaveText('1');
 await screen.getByRole('status', 'Counter').textContent();
@@ -99,13 +99,13 @@ await screen.getByLabel('Plan').selectOption('Pro');
 await expect(screen.getByLabel('Plan')).toHaveValue('pro');
 await expect(screen.getByText('Late arrival')).toBeVisible();
 await screen.getByTestId('item').allTextContents();`);
-    expect(tried.isError, tried.text).toBe(false);
-    expect(tried.text).toContain('All 8 statements passed.\n');
-    expect(tried.text).toContain("1. passed: await app.open('/');\n");
-    expect(tried.text).toContain("4. passed: await screen.getByRole('status', 'Counter').textContent();\n   returned \"1\"\n");
-    expect(tried.text).toContain('   returned ["Item Alpha","Item Beta","Item Gamma"]\n');
-    expect(tried.text).toMatch(/\n\n(?:Screen changes since revision|The screen changed substantially)/);
-    expect(tried.text).toContain('status "Counter" text="1"');
+    expect(result.isError, result.text).toBe(false);
+    expect(result.text).toContain('All 8 statements passed.\n');
+    expect(result.text).toContain("1. passed: await app.open('/');\n");
+    expect(result.text).toContain("4. passed: await screen.getByRole('status', 'Counter').textContent();\n   returned \"1\"\n");
+    expect(result.text).toContain('   returned ["Item Alpha","Item Beta","Item Gamma"]\n');
+    expect(result.text).toMatch(/\n\n(?:Screen changes since revision|The screen changed substantially)/);
+    expect(result.text).toContain('status "Counter" text="1"');
 
     const observed = await call('observe');
     expect(observed.text).toMatch(/combobox "Plan" value="pro"/);
@@ -166,6 +166,12 @@ await screen.getByRole('button', 'Increment').tap();`,
     expect(typed.text.split('\n')[1]).toBe('Test line: await screen.getByRole("textbox", "Token").fill("typed by id");');
     const home = await runCode("await app.open('/');");
     expect(home.isError, home.text).toBe(false);
+  });
+
+  it('runs a locator built with or, as a test would', async () => {
+    const either = await runCode("await expect(screen.getByRole('button', 'Increment').or(screen.getByRole('button', 'Nowhere'))).toBeVisible();");
+    expect(either.isError, either.text).toBe(false);
+    expect(either.text).toContain('The statement passed.\n');
   });
 
   describe('secrets', () => {
@@ -248,6 +254,7 @@ await expect(screen.getByTestId('plain')).toHaveText('nothing yet');`, 300);
         ["await app.open('/echo');\nawait screen.getByTestId('plain').filter({ hasText: 'sk-l' }).count();", 2],
         ["await screen.getByRole('textbox', { name: /Token/ }).fill('typed');", 1],
         ["await expect(screen.getByRole('row').filter({ has: screen.getByText(/sk/) })).toHaveCount(0);", 1],
+        ["await screen.getByLabel('Token').or(screen.getByText(/sk/)).count();", 1],
       ] as const) {
         const probed = await runCode(code);
         expect(probed.isError, code).toBe(true);
