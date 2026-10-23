@@ -84,7 +84,7 @@ export function runCodeTool(options: RunCodeOptions): ToolSet[string] {
   const runner = new LineRunner(options.attempt);
   return {
     description: [
-      'Run test lines against the live session before writing them into a test.',
+      'Run e2e test code against the live session before writing it into a test.',
       "Pass statements as they appear in a test body, such as await screen.getByLabel('Email').fill('ada@example.com'); await expect(screen.getByRole('status')).toHaveText('Saved').",
       "They run in order on the session's screen and app with the test API's own waiting, exactly-one rule, and matchers, and stop at the first failure.",
       `The result gives each statement's pass or failure (code and message) and a read's value, then what changed on screen. Each statement waits at most timeout ms (default ${String(RUN_CODE_TIMEOUT_MS)}).`,

@@ -80,7 +80,7 @@ describe('e2e mcp run_code', { timeout: 120_000 }, () => {
     );
     const opened = await invoke('open_session');
     expect(opened.isError, opened.text).toBe(false);
-    expect(opened.text).toMatch(/^- run_code \{code, timeout\?\}: Run test lines against the live session before writing them into a test\.$/m);
+    expect(opened.text).toMatch(/^- run_code \{code, timeout\?\}: Run e2e test code against the live session before writing it into a test\.$/m);
   }, 60_000);
 
   afterAll(async () => {
