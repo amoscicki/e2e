@@ -14,7 +14,7 @@ acts on it, and checks its work.
 
 | Task | Without `e2e mcp` | With `e2e mcp` |
 | --- | --- | --- |
-| Write a test | Guesses locators, runs, fails, guesses again | Copies a checked test line from each action, and tries its own lines before it writes them |
+| Write a test | Guesses locators, runs, fails, guesses again | Copies a checked test line from each action, and runs its own lines with `run_code` before it writes them |
 | Change the UI | Done when it compiles | Opens the page and checks the result |
 | Reproduce a bug | Guesses from the code | Follows the steps in the app |
 | Show a change in a PR | Describes it | Records a video |
@@ -102,10 +102,10 @@ A test using this locator would fail with LOCATOR_NOT_FOUND. ...
 Use: screen.getByRole("button", "Sign in")
 ```
 
-## How it tries a test line
+## How it runs a test line
 
 The agent runs the lines no action printed, such as assertions, with
-`try_lines` in the open session. The ones that pass join the `test_lines`
+`run_code` in the open session. The ones that pass join the `test_lines`
 draft. A wrong line fails in seconds, without a test run:
 
 ```text wrap
@@ -116,7 +116,7 @@ Statement 2 of 2 failed; the one before it passed. Each statement waited at most
 ```
 
 The server parses the lines and never evaluates them as JavaScript. See
-[`try_lines`](/reference/mcp#try_lines).
+[`run_code`](/reference/mcp#run_code).
 
 ## Run tests next to a session
 
@@ -147,7 +147,7 @@ target.
 
 ## Secrets
 
-`type_secret`, or a `fill` in `try_lines`, fills a secret without showing it
+`type_secret`, or a `fill` in `run_code`, fills a secret without showing it
 to the agent. After a secret is filled, the session stops returning
 screenshots.
 

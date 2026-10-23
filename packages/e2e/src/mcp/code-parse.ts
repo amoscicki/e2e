@@ -1,5 +1,5 @@
 /**
- * The grammar `try_lines` accepts: test statements as they appear in a test
+ * The grammar `run_code` accepts: test statements as they appear in a test
  * body, read by a tokenizer and a recursive-descent parser into data the
  * runner walks. Nothing here, or anywhere after it, evaluates the text as
  * code. A statement is an optional `await`, then a call chain on `screen` or
@@ -9,13 +9,13 @@
  * objects of them, locators on `screen`, `credentials.user(name).username` as
  * a string, and a Secret (`credentials.user(name).password`,
  * `secrets.get(name)`) as `fill`'s value. Every name is checked against the
- * closed table in `lines-surface.ts` as it is read; anything else is
+ * closed table in `code-surface.ts` as it is read; anything else is
  * `INVALID_ARGUMENT` naming the token and where it is.
  */
 
 import { ConfigurationError } from '../internal/errors.ts';
 import { suggest } from '../internal/suggest.ts';
-import { LEFT_OUT, RECEIVER_LABELS, SURFACE, type Arity, type Member, type Receiver } from './lines-surface.ts';
+import { LEFT_OUT, RECEIVER_LABELS, SURFACE, type Arity, type Member, type Receiver } from './code-surface.ts';
 
 /** The longest code one call takes, in characters. */
 const MAX_CODE_LENGTH = 20_000;
@@ -68,15 +68,15 @@ export interface ParseOptions {
 }
 
 /** Parses `code` into statements, or throws `INVALID_ARGUMENT` at the first token outside the grammar. */
-export function parseLines(code: string, options: ParseOptions): readonly Statement[] {
+export function parseCode(code: string, options: ParseOptions): readonly Statement[] {
   if (code.length > MAX_CODE_LENGTH) {
-    throw invalid(`the code is ${String(code.length)} characters; try at most ${String(MAX_CODE_LENGTH)} at once`);
+    throw invalid(`the code is ${String(code.length)} characters; pass at most ${String(MAX_CODE_LENGTH)} at once`);
   }
   return new Parser(code, tokenize(code), options).program();
 }
 
 function invalid(message: string): ConfigurationError {
-  return new ConfigurationError('INVALID_ARGUMENT', `try_lines: ${message}`);
+  return new ConfigurationError('INVALID_ARGUMENT', `run_code: ${message}`);
 }
 
 // --- tokens ---
@@ -227,7 +227,7 @@ function readQuoted(code: string, start: number, at: (offset: number) => string)
     }
     if (char === quote) return { value, end: index + 1 };
     if (quote === '`' && char === '$' && code[index + 1] === '{') {
-      throw invalid(`the template at ${at(start)} has a \${...} expression at ${at(index)}; try_lines runs no expressions, so write the text out`);
+      throw invalid(`the template at ${at(start)} has a \${...} expression at ${at(index)}; run_code runs no expressions, so write the text out`);
     }
     if (char !== '\\') {
       value += char;
@@ -280,7 +280,7 @@ function readRegexBody(code: string, start: number, at: (offset: number) => stri
 /**
  * Whether a pattern repeats without bound a group that repeats or alternates
  * inside, `(\w+\s?)*` or `(a|ab)+`: the shapes that backtrack exponentially.
- * A matcher tests a tried pattern in the server's own thread, where no
+ * A matcher tests a `run_code` pattern in the server's own thread, where no
  * timeout can stop it, so such a pattern would hang every session.
  */
 function repeatsRepetition(source: string): boolean {
@@ -349,12 +349,12 @@ class Parser {
         continue;
       }
       if (statements.length === MAX_STATEMENTS) {
-        throw invalid(`try at most ${String(MAX_STATEMENTS)} statements at once`);
+        throw invalid(`pass at most ${String(MAX_STATEMENTS)} statements at once`);
       }
       statements.push(this.statement());
     }
     if (statements.length === 0) {
-      throw invalid("no statement to try; pass test lines such as await screen.getByRole('button', 'Save').tap();");
+      throw invalid("no statement to run; pass test lines such as await screen.getByRole('button', 'Save').tap();");
     }
     return statements;
   }
@@ -412,7 +412,7 @@ class Parser {
     if (this.isPunctuator('.')) {
       const member = this.tokens[this.index + 1];
       const name = member?.kind === 'identifier' ? `expect.${member.text}` : 'expect';
-      throw invalid(`${name} at ${where(expectToken)} is not in the grammar; try_lines runs expect(...) itself, not expect.soft or expect.poll`);
+      throw invalid(`${name} at ${where(expectToken)} is not in the grammar; run_code runs expect(...) itself, not expect.soft or expect.poll`);
     }
     this.punctuator('(', 'after expect');
     const subject = this.peek();
@@ -456,7 +456,7 @@ class Parser {
 
   /** The refusal of a fixture the target's engine contributes: core names none of its members. */
   private engineFixture(token: Token): ConfigurationError {
-    return invalid(`"${token.text}" at ${where(token)} is a fixture of this target's engine, which try_lines does not run; a statement starts with ${STARTS}`);
+    return invalid(`"${token.text}" at ${where(token)} is a fixture of this target's engine, which run_code does not run; a statement starts with ${STARTS}`);
   }
 
   /** The members called along a chain, each checked against the receiver it is called on. */
@@ -502,14 +502,14 @@ class Parser {
     if (member !== undefined) return member;
     const label = RECEIVER_LABELS[receiver];
     const leftOut = LEFT_OUT.get(nameToken.text);
-    if (leftOut !== undefined) throw invalid(`"${nameToken.text}" at ${where(nameToken)} is left out of try_lines: it ${leftOut}`);
+    if (leftOut !== undefined) throw invalid(`"${nameToken.text}" at ${where(nameToken)} is left out of run_code: it ${leftOut}`);
     if (receiver !== 'locator-expectation' && SURFACE['locator-expectation'].has(nameToken.text)) {
       throw invalid(`"${nameToken.text}" at ${where(nameToken)} is a matcher; call it on expect(...)`);
     }
     const names = [...members.keys()];
     const near = suggest(nameToken.text, names);
     const hint = near === undefined ? `; ${label} takes ${names.join(', ')}` : `; did you mean "${near}"?`;
-    throw invalid(`"${nameToken.text}" at ${where(nameToken)} is not something try_lines runs on ${label}${hint}`);
+    throw invalid(`"${nameToken.text}" at ${where(nameToken)} is not something run_code runs on ${label}${hint}`);
   }
 
   /** A call's parenthesized arguments, counted against what the member takes. */

@@ -46,7 +46,7 @@ export class AttemptBudget {
    * `timeoutMs` from now, when that is sooner, then puts the phase's own
    * deadline back. Every fixture operation in `body` is capped by it, the way
    * the test deadline caps them, so a wait that would outlast it fails at it
-   * with the error a test gets. One body at a time: `e2e mcp`'s `try_lines`
+   * with the error a test gets. One body at a time: `e2e mcp`'s `run_code`
    * runs its statements one after another.
    */
   async capped<T>(timeoutMs: number, body: () => Promise<T>): Promise<T> {

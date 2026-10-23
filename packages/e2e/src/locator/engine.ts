@@ -386,7 +386,7 @@ export class LocatorEngine {
   /**
    * Fills a secret into exactly one match once `authorize` has cleared the
    * node the value lands on, for a caller the harness does not trust with a
-   * fill (`e2e mcp`'s `try_lines`); a test's own `fill` needs no clearance.
+   * fill (`e2e mcp`'s `run_code`); a test's own `fill` needs no clearance.
    * The node is read and cleared on every resolve, so a match that went stale
    * and resolved again is checked again before the value is handed over.
    */

@@ -1,10 +1,10 @@
 /**
- * The session's `try_lines`: test statements tried against the live app
+ * The session's `run_code`: test statements run against the live app
  * before they go into a test. The code is parsed into the closed grammar of
- * `lines-parse.ts` and never evaluated; the runner walks the parsed chains
+ * `code-parse.ts` and never evaluated; the runner walks the parsed chains
  * and reaches each fixture member by a name the grammar's table listed, on
- * the session's `app` and a `screen` over the session's engine, so a tried
- * line waits, matches, and fails as the same line in a test would. Statements
+ * the session's `app` and a `screen` over the session's engine, so a line
+ * run here waits, matches, and fails as the same line in a test would. Statements
  * run in order and stop at the first failure, each with its wait capped at
  * the call's `timeout`, and the result ends with what changed on screen.
  * The statements that pass, reads aside, join the session's `test_lines`.
@@ -36,11 +36,11 @@ import { createScreen, locatorInternals } from '../locator/screen.ts';
 import type { StandaloneAttempt } from '../run/standalone.ts';
 import { secretHandle } from '../secrets.ts';
 import type { ActionOptions, App, Screen, Secret } from '../types.ts';
-import { parseLines, type Call, type Chain, type Statement, type Value } from './lines-parse.ts';
-import { SURFACE } from './lines-surface.ts';
+import { parseCode, type Call, type Chain, type Statement, type Value } from './code-parse.ts';
+import { SURFACE } from './code-surface.ts';
 
 /** How long one statement may wait unless the call says otherwise, in milliseconds. */
-const TRY_LINES_TIMEOUT_MS = 5_000;
+const RUN_CODE_TIMEOUT_MS = 5_000;
 /** The longest a call may let one statement wait. */
 const MAX_TIMEOUT_MS = 120_000;
 /** Every member that builds a locator, so a query the grammar gains is checked as soon as it is listed. */
@@ -48,15 +48,15 @@ const QUERIES: ReadonlySet<string> = new Set([...SURFACE.locator].flatMap(([name
 /** What the secret ledger writes where a value was. */
 const SECRET_MARKER = '<secret:';
 
-/** What the session hands `try_lines`. */
-export interface TryLinesSession {
+/** What the session hands `run_code`. */
+export interface RunCodeSession {
   /** The session's attempt: its fixtures, agent runtime, budget, and engine session. */
   readonly attempt: StandaloneAttempt;
-  /** The fixtures the target's engine contributes, which `try_lines` names in a refusal and never runs. */
+  /** The fixtures the target's engine contributes, which `run_code` names in a refusal and never runs. */
   readonly engineFixtures: readonly string[];
 }
 
-interface TryLinesOptions extends TryLinesSession {
+interface RunCodeOptions extends RunCodeSession {
   /** The session step, observed once the statements ran. */
   readonly context: StepExecutorContext;
   /** The session's presenter, so the screen comes back as changes since the one the agent holds. */
@@ -65,7 +65,7 @@ interface TryLinesOptions extends TryLinesSession {
   readonly record?: ((passed: readonly string[]) => void) | undefined;
 }
 
-interface TryLinesArgs {
+interface RunCodeArgs {
   readonly code: string;
   readonly timeout?: number | undefined;
 }
@@ -79,15 +79,15 @@ interface TriedLines {
 /** What became of one statement. */
 type Outcome = { readonly statement: Statement; readonly value: unknown } | { readonly statement: Statement; readonly error: E2EError };
 
-/** The `try_lines` catalog tool. */
-export function tryLinesTool(options: TryLinesOptions): ToolSet[string] {
+/** The `run_code` catalog tool. */
+export function runCodeTool(options: RunCodeOptions): ToolSet[string] {
   const runner = new LineRunner(options.attempt);
   return {
     description: [
-      'Try test lines against the live session before writing them into a test.',
+      'Run test lines against the live session before writing them into a test.',
       "Pass statements as they appear in a test body, such as await screen.getByLabel('Email').fill('ada@example.com'); await expect(screen.getByRole('status')).toHaveText('Saved').",
       "They run in order on the session's screen and app with the test API's own waiting, exactly-one rule, and matchers, and stop at the first failure.",
-      `The result gives each statement's pass or failure (code and message) and a read's value, then what changed on screen. Each statement waits at most timeout ms (default ${String(TRY_LINES_TIMEOUT_MS)}).`,
+      `The result gives each statement's pass or failure (code and message) and a read's value, then what changed on screen. Each statement waits at most timeout ms (default ${String(RUN_CODE_TIMEOUT_MS)}).`,
       "Statements that pass, except reads, join test_lines' draft in the order they ran.",
       'The code is parsed, never evaluated as JavaScript: a statement starts with screen, app, or expect(locator), chains getBy* queries, filter, first, last, and nth, and ends in an action, a read, or a matcher.',
       "Arguments are literals, regular expressions, arrays, objects, locators on screen, and credentials.user('name').username.",
@@ -102,20 +102,20 @@ export function tryLinesTool(options: TryLinesOptions): ToolSet[string] {
         .min(1)
         .max(MAX_TIMEOUT_MS)
         .optional()
-        .describe(`How long each statement may wait, in milliseconds; default ${String(TRY_LINES_TIMEOUT_MS)}`),
+        .describe(`How long each statement may wait, in milliseconds; default ${String(RUN_CODE_TIMEOUT_MS)}`),
     }).strict(),
-    execute: (args: TryLinesArgs, call: ToolExecutionOptions<unknown>) => tryLines(options, runner, args, call.abortSignal),
+    execute: (args: RunCodeArgs, call: ToolExecutionOptions<unknown>) => runCode(options, runner, args, call.abortSignal),
     toModelOutput: ({ output }: { readonly output: TriedLines }) => ({ type: output.failed ? ('error-text' as const) : ('text' as const), value: output.text }),
   };
 }
 
 /** Parses the code, runs its statements until one fails, and renders what happened. */
-async function tryLines(options: TryLinesOptions, runner: LineRunner, args: TryLinesArgs, signal: AbortSignal | undefined): Promise<TriedLines> {
-  const statements = parseLines(args.code, { fixtures: options.engineFixtures });
+async function runCode(options: RunCodeOptions, runner: LineRunner, args: RunCodeArgs, signal: AbortSignal | undefined): Promise<TriedLines> {
+  const statements = parseCode(args.code, { fixtures: options.engineFixtures });
   const { agentRuntime: runtime, budget } = options.attempt;
   refuseMarkerExpectations(statements);
   if (runtime.config.allSecrets.size > 0) refuseLocatorsByPart(statements);
-  const timeout = args.timeout ?? TRY_LINES_TIMEOUT_MS;
+  const timeout = args.timeout ?? RUN_CODE_TIMEOUT_MS;
   const outcomes: Outcome[] = [];
   for (const statement of statements) {
     if (signal?.aborted === true) break;
@@ -156,7 +156,7 @@ function refuseLocatorsByPart(statements: readonly Statement[]): void {
     if (![subject, ...locatorsIn(calls)].some((chain) => chain.calls.some(findsByPart))) return;
     throw new ConfigurationError(
       'POLICY_DENIED',
-      `try_lines: statement ${String(index + 1)} (${statement.source}) finds a locator by part of a text, and this project configures secrets: the engine matches a regular expression, exact: false, or hasText on unredacted text, so whether it matches could spell a secret out one piece at a time. Find the locator by its exact text; nothing ran.`,
+      `run_code: statement ${String(index + 1)} (${statement.source}) finds a locator by part of a text, and this project configures secrets: the engine matches a regular expression, exact: false, or hasText on unredacted text, so whether it matches could spell a secret out one piece at a time. Find the locator by its exact text; nothing ran.`,
     );
   });
 }
@@ -185,7 +185,7 @@ function refuseMarkerExpectations(statements: readonly Statement[]): void {
     if (statement.body.kind !== 'expect' || !statement.body.matcher.args.some(holdsMarker)) return;
     throw new ConfigurationError(
       'INVALID_ARGUMENT',
-      `try_lines: statement ${String(index + 1)} (${statement.source}) expects ${SECRET_MARKER}name>, which only redacted text holds: a test compares the real value, so the line would fail there. Assert what the screen shows around the secret instead; nothing ran.`,
+      `run_code: statement ${String(index + 1)} (${statement.source}) expects ${SECRET_MARKER}name>, which only redacted text holds: a test compares the real value, so the line would fail there. Assert what the screen shows around the secret instead; nothing ran.`,
     );
   });
 }
@@ -350,8 +350,8 @@ class LineRunner {
    * `locator.fill(secret)` under the authorization `type_secret` runs: a
    * configured secret, an enabled editable field, and a password field for a
    * password, checked on the node the value lands on, every time the locator
-   * resolves. A test's own `fill` skips this as trusted code; tried lines
-   * come from the coding agent, which is not.
+   * resolves. A test's own `fill` skips this as trusted code; `run_code`
+   * statements come from the coding agent, which is not.
    */
   private fillSecret(receiver: unknown, secret: Secret, options: unknown): Promise<void> {
     const internals = locatorInternals(receiver);
@@ -386,7 +386,7 @@ function render(statements: readonly Statement[], outcomes: readonly Outcome[], 
     const unrun = total - failure - 1;
     lines.push(
       `Statement ${String(failure + 1)} of ${String(total)} failed${failure === 0 ? '' : `; the ${failure === 1 ? 'one' : String(failure)} before it passed`}${unrun === 0 ? '' : `, and ${unrun === 1 ? 'the one' : `the ${String(unrun)}`} after it did not run`}.` +
-        ` Each statement waited at most ${String(timeout)} ms.${failure === 0 ? '' : ' The app is where the passing statements left it: try the fixed statement and the rest from here.'}`,
+        ` Each statement waited at most ${String(timeout)} ms.${failure === 0 ? '' : ' The app is where the passing statements left it: run the fixed statement and the rest from here.'}`,
     );
   } else if (outcomes.length < total) {
     lines.push(`Cancelled after ${String(outcomes.length)} of ${String(total)} statements.`);

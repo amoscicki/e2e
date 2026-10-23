@@ -1,6 +1,6 @@
 /**
- * `try_lines` end to end: the built CLI serving a fixture project over stdio
- * to a real MCP client, on the web engine and the fixture app. Tried lines
+ * `run_code` end to end: the built CLI serving a fixture project over stdio
+ * to a real MCP client, on the web engine and the fixture app. Statements
  * run on the session's fixtures with the test API's own waiting, matching,
  * and matchers; they stop at the first failure within the call's timeout;
  * code outside the grammar runs nothing. A Secret fills only under the
@@ -40,7 +40,7 @@ interface ToolText {
   readonly images: number;
 }
 
-describe('e2e mcp try_lines', { timeout: 120_000 }, () => {
+describe('e2e mcp run_code', { timeout: 120_000 }, () => {
   let app: FixtureApp;
   let project: FixtureProject;
   let client: Client;
@@ -58,7 +58,7 @@ describe('e2e mcp try_lines', { timeout: 120_000 }, () => {
   };
 
   const call = (tool: string, args: Record<string, unknown> = {}): Promise<ToolText> => invoke('call', { tool, args });
-  const tryLines = (code: string, timeout?: number): Promise<ToolText> => call('try_lines', { code, ...(timeout === undefined ? {} : { timeout }) });
+  const runCode = (code: string, timeout?: number): Promise<ToolText> => call('run_code', { code, ...(timeout === undefined ? {} : { timeout }) });
   const nodeId = (text: string, pattern: RegExp): string => {
     const match = /#(n\d+)/.exec(text.split('\n').find((line) => pattern.test(line)) ?? '');
     if (match === null) throw new Error(`no node matches ${pattern} in:\n${text}`);
@@ -68,7 +68,7 @@ describe('e2e mcp try_lines', { timeout: 120_000 }, () => {
   beforeAll(async () => {
     app = await startFixtureApp();
     project = createProject({ 'e2e.config.ts': CONFIG });
-    client = new Client({ name: 'e2e-mcp-try-lines-test', version: '0.0.0' });
+    client = new Client({ name: 'e2e-mcp-run-code-test', version: '0.0.0' });
     await client.connect(
       new StdioClientTransport({
         command: process.execPath,
@@ -80,7 +80,7 @@ describe('e2e mcp try_lines', { timeout: 120_000 }, () => {
     );
     const opened = await invoke('open_session');
     expect(opened.isError, opened.text).toBe(false);
-    expect(opened.text).toMatch(/^- try_lines \{code, timeout\?\}: Try test lines against the live session before writing them into a test\.$/m);
+    expect(opened.text).toMatch(/^- run_code \{code, timeout\?\}: Run test lines against the live session before writing them into a test\.$/m);
   }, 60_000);
 
   afterAll(async () => {
@@ -91,7 +91,7 @@ describe('e2e mcp try_lines', { timeout: 120_000 }, () => {
   });
 
   it("runs a block on the session's fixtures with the test API's semantics, shows reads, and reports what changed", async () => {
-    const tried = await tryLines(`await app.open('/');
+    const tried = await runCode(`await app.open('/');
 await screen.getByRole('button', 'Increment').tap();
 await expect(screen.getByRole('status', 'Counter')).toHaveText('1');
 await screen.getByRole('status', 'Counter').textContent();
@@ -113,7 +113,7 @@ await screen.getByTestId('item').allTextContents();`);
 
   it('stops at the first failure within the timeout, gives its code and message, and leaves the rest unrun', async () => {
     const started = Date.now();
-    const missing = await tryLines(
+    const missing = await runCode(
       `await screen.getByLabel('Emial').fill('ada@example.test');
 await screen.getByRole('button', 'Increment').tap();`,
       500,
@@ -125,25 +125,25 @@ await screen.getByRole('button', 'Increment').tap();`,
     );
     expect(missing.text).toMatch(/\n\nScreen unchanged since revision/);
 
-    const ambiguous = await tryLines("await screen.getByRole('button', 'Increment').tap();\nawait screen.getByText('Duplicated').tap();\nawait app.back();");
+    const ambiguous = await runCode("await screen.getByRole('button', 'Increment').tap();\nawait screen.getByText('Duplicated').tap();\nawait app.back();");
     expect(ambiguous.isError).toBe(true);
-    expect(ambiguous.text).toContain('Statement 2 of 3 failed; the one before it passed, and the one after it did not run. Each statement waited at most 5000 ms. The app is where the passing statements left it: try the fixed statement and the rest from here.');
+    expect(ambiguous.text).toContain('Statement 2 of 3 failed; the one before it passed, and the one after it did not run. Each statement waited at most 5000 ms. The app is where the passing statements left it: run the fixed statement and the rest from here.');
     expect(ambiguous.text).toContain('LOCATOR_AMBIGUOUS: locator matched 2 nodes, expected exactly one: getByText("Duplicated")');
 
-    const assertion = await tryLines("await expect(screen.getByRole('status', 'Counter')).toHaveText('99');", 300);
+    const assertion = await runCode("await expect(screen.getByRole('status', 'Counter')).toHaveText('99');", 300);
     expect(assertion.isError).toBe(true);
     expect(assertion.text).toContain('ASSERTION_FAILED: expect.toHaveText failed\n   locator: getByRole("status", name: "Counter")\n   expected: text "99"\n   observed: text "2"');
   });
 
   it('refuses code outside the grammar before running any of it', async () => {
-    const refused = await tryLines("await screen.getByRole('button', 'Increment').tap();\nprocess.exit(1);");
+    const refused = await runCode("await screen.getByRole('button', 'Increment').tap();\nprocess.exit(1);");
     expect(refused.isError).toBe(true);
-    expect(refused.text).toBe('INVALID_ARGUMENT: try_lines: "process" at 2:1 is not in the grammar; a statement starts with screen, app, or expect(...)');
-    const evaluated = await tryLines("await browser.evaluate('document.title')");
+    expect(refused.text).toBe('INVALID_ARGUMENT: run_code: "process" at 2:1 is not in the grammar; a statement starts with screen, app, or expect(...)');
+    const evaluated = await runCode("await browser.evaluate('document.title')");
     expect(evaluated.text).toBe(
-      'INVALID_ARGUMENT: try_lines: "browser" at 1:7 is a fixture of this target\'s engine, which try_lines does not run; a statement starts with screen, app, or expect(...)',
+      'INVALID_ARGUMENT: run_code: "browser" at 1:7 is a fixture of this target\'s engine, which run_code does not run; a statement starts with screen, app, or expect(...)',
     );
-    const unchanged = await tryLines("await expect(screen.getByRole('status', 'Counter')).toHaveText('2')", 300);
+    const unchanged = await runCode("await expect(screen.getByRole('status', 'Counter')).toHaveText('2')", 300);
     expect(unchanged.isError, unchanged.text).toBe(false);
   });
 
@@ -160,11 +160,11 @@ await screen.getByRole('button', 'Increment').tap();`,
       "await screen.getByRole('button', 'Increment').tap();",
       "await expect(screen.getByRole('status', 'Counter')).toHaveText('2');",
     ]);
-    // The next action's test line is read from the screen try_lines returned.
-    const echo = await tryLines("await app.open('/echo');");
+    // The next action's test line is read from the screen run_code returned.
+    const echo = await runCode("await app.open('/echo');");
     const typed = await call('type', { target: nodeId(echo.text, /textbox "Token"/), value: 'typed by id' });
     expect(typed.text.split('\n')[1]).toBe('Test line: await screen.getByRole("textbox", "Token").fill("typed by id");');
-    const home = await tryLines("await app.open('/');");
+    const home = await runCode("await app.open('/');");
     expect(home.isError, home.text).toBe(false);
   });
 
@@ -173,29 +173,29 @@ await screen.getByRole('button', 'Increment').tap();`,
       const before = await call('screenshot');
       expect(before.images).toBe(1);
 
-      const intoEmail = await tryLines("await screen.getByLabel('Email').fill(credentials.user('admin').password);");
+      const intoEmail = await runCode("await screen.getByLabel('Email').fill(credentials.user('admin').password);");
       expect(intoEmail.isError).toBe(true);
       expect(intoEmail.text).toContain('POLICY_DENIED: field purpose username is incompatible with secret purpose password');
-      const intoButton = await tryLines("await screen.getByRole('button', 'Increment').fill(secrets.get('apiKey'));");
+      const intoButton = await runCode("await screen.getByRole('button', 'Increment').fill(secrets.get('apiKey'));");
       expect(intoButton.text).toContain('POLICY_DENIED: the target is not an editable input (role button)');
-      const unconfigured = await tryLines("await screen.getByLabel('Password').fill(credentials.user('ghost').password);");
+      const unconfigured = await runCode("await screen.getByLabel('Password').fill(credentials.user('ghost').password);");
       expect(unconfigured.text).toContain('AUTH_CREDENTIAL_UNAVAILABLE: credential "ghost" is not configured');
-      const unknown = await tryLines("await screen.getByLabel('Email').fill(secrets.get('stripeKey'));");
+      const unknown = await runCode("await screen.getByLabel('Email').fill(secrets.get('stripeKey'));");
       expect(unknown.text).toContain('SECRET_UNAVAILABLE: secret "stripeKey" is not configured');
-      const emailValue = await tryLines("await screen.getByLabel('Email').inputValue()");
+      const emailValue = await runCode("await screen.getByLabel('Email').inputValue()");
       expect(emailValue.text).toContain('returned ""');
       // Refused before a value was resolved: nothing reached the screen, so pixels stay on.
       const stillClean = await call('screenshot');
       expect(stillClean.images).toBe(1);
 
-      const signedIn = await tryLines(`await screen.getByLabel('Email').fill(credentials.user('admin').username);
+      const signedIn = await runCode(`await screen.getByLabel('Email').fill(credentials.user('admin').username);
 await screen.getByLabel('Password').fill(credentials.user('admin').password);`);
       expect(signedIn.isError, signedIn.text).toBe(false);
       expect(signedIn.text).toContain('All 2 statements passed.');
-      const read = await tryLines("await screen.getByLabel('Password').inputValue();");
+      const read = await runCode("await screen.getByLabel('Password').inputValue();");
       expect(read.isError).toBe(true);
       expect(read.text).toContain('POLICY_DENIED: reading values from a secure field is denied: getByLabel("Password")');
-      const asserted = await tryLines("await expect(screen.getByLabel('Password')).toHaveValue('guess')", 300);
+      const asserted = await runCode("await expect(screen.getByLabel('Password')).toHaveValue('guess')", 300);
       expect(asserted.text).toContain('POLICY_DENIED: reading values from a secure field is denied');
 
       const after = await call('screenshot');
@@ -204,7 +204,7 @@ await screen.getByLabel('Password').fill(credentials.user('admin').password);`);
     });
 
     it('fills a generic secret into a plain field and redacts it from every read and failure', async () => {
-      const echoed = await tryLines(`await app.open('/echo');
+      const echoed = await runCode(`await app.open('/echo');
 await screen.getByLabel('Token').fill(secrets.get('apiKey'));
 await screen.getByLabel('Token').inputValue();
 await screen.getByTestId('plain').textContent();
@@ -225,18 +225,18 @@ await expect(screen.getByTestId('plain')).toHaveText('nothing yet');`, 300);
         "await expect(screen.getByLabel('Token')).toHaveValue(/^sk-l/);",
         "await expect(screen.getByTestId('upper')).toHaveText(/SK-LIVE/i);",
       ]) {
-        const probed = await tryLines(code, 300);
+        const probed = await runCode(code, 300);
         expect(probed.isError, code).toBe(true);
         expect(probed.text, code).toContain('ASSERTION_FAILED');
         expect(probed.text, code).toContain('<secret:apiKey>');
       }
       // A test compares the real value, so a line expecting the marker would pass here and fail there.
-      const marker = await tryLines("await screen.getByLabel('Note').fill('kept');\nawait expect(screen.getByTestId('plain')).toHaveText('<secret:apiKey>');");
+      const marker = await runCode("await screen.getByLabel('Note').fill('kept');\nawait expect(screen.getByTestId('plain')).toHaveText('<secret:apiKey>');");
       expect(marker.isError).toBe(true);
       expect(marker.text).toBe(
-        "INVALID_ARGUMENT: try_lines: statement 2 (await expect(screen.getByTestId('plain')).toHaveText('<secret:apiKey>');) expects <secret:name>, which only redacted text holds: a test compares the real value, so the line would fail there. Assert what the screen shows around the secret instead; nothing ran.",
+        "INVALID_ARGUMENT: run_code: statement 2 (await expect(screen.getByTestId('plain')).toHaveText('<secret:apiKey>');) expects <secret:name>, which only redacted text holds: a test compares the real value, so the line would fail there. Assert what the screen shows around the secret instead; nothing ran.",
       );
-      const note = await tryLines("await screen.getByLabel('Note').inputValue();");
+      const note = await runCode("await screen.getByLabel('Note').inputValue();");
       expect(note.text).toContain('returned ""');
     });
 
@@ -249,20 +249,20 @@ await expect(screen.getByTestId('plain')).toHaveText('nothing yet');`, 300);
         ["await screen.getByRole('textbox', { name: /Token/ }).fill('typed');", 1],
         ["await expect(screen.getByRole('row').filter({ has: screen.getByText(/sk/) })).toHaveCount(0);", 1],
       ] as const) {
-        const probed = await tryLines(code);
+        const probed = await runCode(code);
         expect(probed.isError, code).toBe(true);
-        expect(probed.text, code).toMatch(new RegExp(`^POLICY_DENIED: try_lines: statement ${String(statement)} \\(.*\\) finds a locator by part of a text, and this project configures secrets`));
+        expect(probed.text, code).toMatch(new RegExp(`^POLICY_DENIED: run_code: statement ${String(statement)} \\(.*\\) finds a locator by part of a text, and this project configures secrets`));
         expect(probed.text, code).toContain('nothing ran.');
       }
-      const exact = await tryLines("await screen.getByDisplayValue('sk-live-WRONG').count();");
+      const exact = await runCode("await screen.getByDisplayValue('sk-live-WRONG').count();");
       expect(exact.isError, exact.text).toBe(false);
       expect(exact.text).toContain('returned 0');
       // The refused block never opened /echo again: the field still holds the secret.
-      const still = await tryLines("await screen.getByLabel('Token').inputValue();");
+      const still = await runCode("await screen.getByLabel('Token').inputValue();");
       expect(still.text).toContain('returned "<secret:apiKey>"');
     });
 
-    it('drafts the tried secret fills in test_lines by name', async () => {
+    it('drafts the secret fills it ran in test_lines by name', async () => {
       const drafted = await call('test_lines');
       expect(drafted.text).toContain("\nawait screen.getByLabel('Password').fill(credentials.user('admin').password);\n");
       expect(drafted.text).toContain("\nawait screen.getByLabel('Token').fill(secrets.get('apiKey'));\n");

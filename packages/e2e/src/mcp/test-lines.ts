@@ -10,7 +10,7 @@
  * target and nothing else is printed, one that matches its twins too is
  * narrowed (to the nodes that render, under a container, or by position, in
  * that order), and otherwise the result says why there is no line. The
- * session keeps the lines in order, with the statements `try_lines` passed
+ * session keeps the lines in order, with the statements `run_code` passed
  * among them, and `test_lines` returns them as a draft test body. Only the
  * session catalog wraps its grammar this way; the testing agent's model loop
  * never sees a line.
@@ -178,10 +178,10 @@ export class SessionTestLines {
     this.entries.push({ tool: 'open_session', line: 'await app.open();' });
   }
 
-  /** Records statements `try_lines` ran and passed, already in a test's own words, each awaited and ended as a test line. */
-  tried(sources: readonly string[]): void {
+  /** Records statements `run_code` ran and passed, already in a test's own words, each awaited and ended as a test line. */
+  ran(sources: readonly string[]): void {
     for (const source of sources) {
-      this.entries.push({ tool: 'try_lines', line: `${source.startsWith('await ') ? '' : 'await '}${source}${source.endsWith(';') ? '' : ';'}` });
+      this.entries.push({ tool: 'run_code', line: `${source.startsWith('await ') ? '' : 'await '}${source}${source.endsWith(';') ? '' : ';'}` });
     }
   }
 
@@ -196,7 +196,7 @@ export class SessionTestLines {
   tool(): ToolSet[string] {
     return {
       description:
-        "Every test line this session's actions printed so far, in order, as a draft test body: the screen.* and app.* calls that repeat each action, with a comment where an action has none, and the statements try_lines passed, as written. Paste it into a test, then add any assertion it lacks.",
+        "Every test line this session's actions printed so far, in order, as a draft test body: the screen.* and app.* calls that repeat each action, with a comment where an action has none, and the statements run_code passed, as written. Paste it into a test, then add any assertion it lacks.",
       inputSchema: z.object({}).strict(),
       execute: async () => this.draft(),
     };
@@ -205,7 +205,7 @@ export class SessionTestLines {
   /** The recorded lines as a draft test body. */
   draft(): string {
     if (this.entries.length === 0) {
-      return 'No test lines yet. Each action (tap, type, select, check, and the rest) prints the line that repeats it in a test, try_lines adds the statements that pass, and this tool returns them in order.';
+      return 'No test lines yet. Each action (tap, type, select, check, and the rest) prints the line that repeats it in a test, run_code adds the statements that pass, and this tool returns them in order.';
     }
     const body = this.entries.map((entry) => ('line' in entry ? entry.line : `// ${entry.tool}: no test line: ${entry.reason}`));
     const imports = ['credentials', 'secrets'].filter((name) => body.some((line) => line.includes(`${name}.`)));

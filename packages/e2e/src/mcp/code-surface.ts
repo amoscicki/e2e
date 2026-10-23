@@ -1,5 +1,5 @@
 /**
- * What `try_lines` may call, by receiver: the queries, actions, reads, and
+ * What `run_code` may call, by receiver: the queries, actions, reads, and
  * matchers of the public test API (`types.ts`), each with the number of
  * arguments it takes. The table is closed and typed against the public
  * interfaces: a name it does not list is refused while the code is parsed, so
@@ -133,7 +133,7 @@ export const RECEIVER_LABELS: Readonly<Record<Receiver, string>> = {
 };
 
 /**
- * Public members `try_lines` leaves out on purpose, with why. Each would
+ * Public members `run_code` leaves out on purpose, with why. Each would
  * print where nobody reads, read files, write pixels the session withholds,
  * or need a test file.
  */

@@ -7,7 +7,7 @@ icon: "plug"
 ---
 
 `e2e mcp` lets coding agents such as Claude Code and Cursor inspect your app,
-try locators and test lines, and take masked screenshots before writing
+try locators, run test lines, and take masked screenshots before writing
 tests. It runs over stdio and uses the project's configured engine. For setup
 and what to ask the agent, see the [MCP server guide](/mcp-server).
 
@@ -167,7 +167,7 @@ What `call` can run depends on the session's target.
 | [Actions](#actions) | Act on an observed node |
 | [`dismiss_keyboard`](#dismiss_keyboard) | Hides the on-screen keyboard |
 | [`locate`](#locate) | Tries a semantic locator |
-| [`try_lines`](#try_lines) | Runs test statements |
+| [`run_code`](#run_code) | Runs test statements |
 | [`test_lines`](#test_lines) | Returns the session's test lines |
 | [`screenshot`](#screenshot) | Returns the masked viewport |
 | [Point tools](#point-tools) | Act at a screenshot point |
@@ -228,14 +228,14 @@ Returns how many nodes match a semantic locator, which ones, and the
 - What it shows of a node passes the secret ledger, as `observe` does: a
   filled secret reads `<secret:name>`.
 
-#### `try_lines`
+#### `run_code`
 
 Runs test statements on the live session and returns each one's pass or
-failure, a read's value, and what changed on screen. Try a line here before
+failure, a read's value, and what changed on screen. Run a line here before
 you write it into a test.
 
 ```txt
-call {tool: "try_lines", args: {code: "await screen.getByLabel('Email').fill('ada@example.com');\nawait expect(screen.getByRole('status')).toHaveText('Saved');"}}
+call {tool: "run_code", args: {code: "await screen.getByLabel('Email').fill('ada@example.com');\nawait expect(screen.getByRole('status')).toHaveText('Saved');"}}
 ```
 
 | Input | Does |
@@ -300,7 +300,7 @@ short text, and nothing could stop it.
 #### `test_lines`
 
 Returns every test line the session's actions printed, and every statement
-[`try_lines`](#try_lines) passed, in order, as a draft test body. Takes no
+[`run_code`](#run_code) passed, in order, as a draft test body. Takes no
 arguments.
 
 Each action's result carries its line after the summary:
@@ -496,7 +496,7 @@ exits.
 Sessions enforce what tests enforce:
 
 - Node ids are valid only against the newest observation.
-- A secret fills only through `type_secret` or a [`try_lines`](#try_lines)
+- A secret fills only through `type_secret` or a [`run_code`](#run_code)
   `fill`, under the same checks. Once one has been filled,
   [`screenshot`](#screenshot) and the [point tools](#point-tools) stay in the
   catalog but answer `PIXEL_TAINTED` for the rest of the session.

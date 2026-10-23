@@ -417,10 +417,10 @@ describe('SessionTestLines', () => {
     );
   });
 
-  it('drafts the statements try_lines passed among the action lines, each awaited and ended', async () => {
+  it('drafts the statements run_code passed among the action lines, each awaited and ended', async () => {
     const session = await harness({ screen: [save], matches: { 'getByRole("button", name: "Save")': [save] } });
     session.lines.opened();
-    session.lines.tried(["await screen.getByLabel('Email').fill(credentials.user('admin').password);", "expect(screen.getByRole('status')).toHaveText('Saved')"]);
+    session.lines.ran(["await screen.getByLabel('Email').fill(credentials.user('admin').password);", "expect(screen.getByRole('status')).toHaveText('Saved')"]);
     await session.run('tap', { target: 'n2' });
     const draft = session.lines.draft();
     expect(draft.split('\n').slice(0, 6)).toEqual([
