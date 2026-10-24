@@ -654,6 +654,33 @@ describe('ListReporter', () => {
       expect(lines[ai + 1]).toBe('      Cache  2 replayed · 1 handed off');
     });
 
+    it('counts the steps whose recording was not saved', () => {
+      const { lines, output } = capture();
+      const reporter = plainReporter(output);
+      reporter.handle(runStarted({ model: 'openai/gpt-5.6-luna-fast' }));
+      reporter.handle(plan([{ file: 'tests/a.e2e.ts', tests: 1 }]));
+      const step = (id: string, write: string) =>
+        ({
+          id,
+          index: 0,
+          kind: 'agent',
+          api: 'agent.act',
+          label: 'do it',
+          status: 'passed',
+          startedAt: new Date(0).toISOString(),
+          durationMs: 10,
+          events: [],
+          artifacts: [],
+          cache: { mode: 'missed', reason: 'no-entry', write },
+          model: { provider: 'openai', model: 'gpt-5.6-luna-fast', calls: 1, inputTokens: 1_000, outputTokens: 100 },
+        }) as unknown as AttemptRecord['steps'][number];
+      const steps = [step('saved', 'saved'), step('unconfirmed', 'unconfirmed'), step('no-change', 'no-change'), step('not-written', 'not-written')];
+      reporter.handle(finished(result({ status: 'passed', file: 'tests/a.e2e.ts', attempts: [attempt({ steps })] })));
+      reporter.handle(runFinished({ reportPath: 'r.json' }));
+      const ai = lines.findIndex((line) => line.trimStart().startsWith('AI'));
+      expect(lines[ai + 1]).toBe('      Cache  4 missed · 3 not saved');
+    });
+
     it('names the interrupt from run-finished alone when the host aborted without the event', () => {
       const { lines, output } = capture();
       plainReporter(output).handle(runFinished({ status: 'interrupted', exitCode: 130 }));
