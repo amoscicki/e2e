@@ -37,6 +37,7 @@ import {
   formatClock,
   formatTime,
   modelsText,
+  notSavedCount,
   padTitle,
   rule,
   stateString,
@@ -138,12 +139,8 @@ function appLogTally(appLog: readonly AppLogRecord[]): string | undefined {
 }
 
 /**
- * The steps whose unsaved recordings a result reports: its latest passing
- * run's, and none for a result that did not pass. An earlier attempt's unsaved
- * step may have been saved by the retry, and a failed attempt leaves every
- * `act` after its last passing check unconfirmed by design, which only
- * repeats the failure. For a serial member, the latest passing run also covers
- * a retry that never reached the members.
+ * The steps a passed or flaky result counts as not saved: its latest passing
+ * run's, since a retry may have saved what an earlier attempt did not.
  */
 function passingRunSteps(
   runs: readonly ({ readonly status: AttemptStatus; readonly steps: readonly StepRecord[] } | undefined)[],
@@ -161,7 +158,7 @@ function attemptDetails(attempts: readonly AttemptRecord[], passed: boolean, con
     durationMs: attempts.reduce((total, attempt) => total + attempt.durationMs, 0),
     usage: stepsUsage(steps),
     models: stepsModelTally(steps),
-    cache: stepsCacheTally(steps, passingRunSteps(attempts, passed)),
+    cache: { ...stepsCacheTally(steps), notSaved: notSavedCount(passingRunSteps(attempts, passed)) },
     error: told?.error,
     videos: videoPaths(attempts),
     ...failureOf(told),
@@ -214,7 +211,7 @@ function serialMemberDetails(group: SerialGroupRecord, testId: string, passed: b
     durationMs: runs.reduce((total, run) => total + (run.member?.durationMs ?? 0), 0),
     usage: stepsUsage(steps),
     models: stepsModelTally(steps),
-    cache: stepsCacheTally(steps, passingRunSteps(runs.map((run) => run.member), passed)),
+    cache: { ...stepsCacheTally(steps), notSaved: notSavedCount(passingRunSteps(runs.map((run) => run.member), passed)) },
     error: own?.error ?? (neverRan ? last?.attempt.error : undefined),
     // The group's recording covers every member, so a failed member points at it.
     videos: videoPaths(group.attempts),

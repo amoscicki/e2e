@@ -745,6 +745,32 @@ describe('ListReporter', () => {
       ])).toBe('      Cache  1 missed · 1 not saved');
     });
 
+    it('counts not saved from the latest of two passing serial runs', () => {
+      const memberError = { category: 'test' as const, code: 'ASSERTION_FAILED', message: 'check failed', retryable: false };
+      expect(cacheRow([
+        plan([{ file: 'tests/case.e2e.ts', tests: 2 }]),
+        serialGroup('g1', [
+          { members: [serialMember('m1', { steps: [cacheStep('first', 'unconfirmed')] }), serialMember('m2', { status: 'failed', error: memberError })], error: memberError },
+          { members: [serialMember('m1', { steps: [cacheStep('retry', 'saved')] }), serialMember('m2')] },
+        ], { status: 'flaky' }),
+        finished(result({ status: 'flaky', id: 'm1', title: ['wizard', 'step 1'], serialGroupId: 'g1' })),
+        finished(result({ status: 'flaky', id: 'm2', title: ['wizard', 'step 2'], declarationIndex: 1, serialGroupId: 'g1' })),
+      ])).toBe('      Cache  2 missed');
+    });
+
+    it('adds nothing for a failed serial member that passed in an earlier group attempt', () => {
+      const memberError = { category: 'test' as const, code: 'ASSERTION_FAILED', message: 'check failed', retryable: false };
+      expect(cacheRow([
+        plan([{ file: 'tests/case.e2e.ts', tests: 2 }]),
+        serialGroup('g1', [
+          { members: [serialMember('m1', { steps: [cacheStep('first', 'unconfirmed')] }), serialMember('m2', { status: 'failed', error: memberError })], error: memberError },
+          { members: [serialMember('m1', { status: 'failed', error: memberError, steps: [cacheStep('retry', 'unconfirmed')] }), serialMember('m2', { status: 'skipped' })], error: memberError },
+        ], { status: 'failed' }),
+        finished(result({ status: 'failed', id: 'm1', title: ['wizard', 'step 1'], serialGroupId: 'g1' })),
+        finished(result({ status: 'skipped', id: 'm2', title: ['wizard', 'step 2'], declarationIndex: 1, serialGroupId: 'g1' })),
+      ])).toBe('      Cache  2 missed');
+    });
+
     it('names the interrupt from run-finished alone when the host aborted without the event', () => {
       const { lines, output } = capture();
       plainReporter(output).handle(runFinished({ status: 'interrupted', exitCode: 130 }));
