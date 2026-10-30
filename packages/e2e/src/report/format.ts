@@ -245,7 +245,7 @@ export function usageText(usage: AiUsage): string | undefined {
 /**
  * How the trace cache handled a run's agent steps, by step: replayed whole
  * with no model turn, replayed in part before the model took over, or missed;
- * and the steps whose recording the attempt did not save.
+ * and the steps of passing tests whose recording was not saved.
  * A run with the cache off records no cache detail and tallies nothing.
  */
 export interface CacheTally {
@@ -255,7 +255,7 @@ export interface CacheTally {
   notSaved: number;
 }
 
-/** The `step.cache.write` outcomes that leave a step with no recording for the next run. */
+/** The `step.cache.write` outcomes where the step's recording was not written. */
 const NOT_SAVED: ReadonlySet<CacheWrite> = new Set(['unconfirmed', 'no-change', 'not-written']);
 
 export function emptyCacheTally(): CacheTally {
@@ -269,9 +269,13 @@ export function addCacheTally(into: CacheTally, counts: CacheTally): void {
   into.notSaved += counts.notSaved;
 }
 
-/** The trace cache's part in several step lists, by step. */
-export function stepsCacheTally(stepLists: readonly (readonly StepRecord[])[]): CacheTally {
+/**
+ * The trace cache's part in several step lists, by step, and the steps of
+ * `passingRun` whose recording was not saved.
+ */
+export function stepsCacheTally(stepLists: readonly (readonly StepRecord[])[], passingRun: readonly StepRecord[]): CacheTally {
   const counts = emptyCacheTally();
+  counts.notSaved = passingRun.filter((step) => step.cache?.write !== undefined && NOT_SAVED.has(step.cache.write)).length;
   for (const steps of stepLists) {
     for (const step of steps) {
       switch (step.cache?.mode) {
@@ -287,7 +291,6 @@ export function stepsCacheTally(stepLists: readonly (readonly StepRecord[])[]): 
         case undefined:
           break;
       }
-      if (step.cache?.write !== undefined && NOT_SAVED.has(step.cache.write)) counts.notSaved += 1;
     }
   }
   return counts;

@@ -14,8 +14,8 @@ import type { SerializedError } from '../internal/errors.ts';
 import { resultId } from '../internal/ids.ts';
 import { packageVersion } from '../internal/package-version.ts';
 import type { RunEvent, RunEventFact, RunEventOf, RunEventResult, SetupStep } from '../run/events.ts';
-import type { AppLogRecord } from '../run/steps.ts';
-import { cleanupErrorsOf, failureBeforeSkip, type ArtifactRecord, type AttemptRecord, type FailureEvidence, type ResultStatus, type SerialGroupRecord } from '../run/records.ts';
+import type { AppLogRecord, StepRecord } from '../run/steps.ts';
+import { cleanupErrorsOf, failureBeforeSkip, type ArtifactRecord, type AttemptRecord, type AttemptStatus, type FailureEvidence, type ResultStatus, type SerialGroupRecord } from '../run/records.ts';
 import type { Reporter, ReporterSummary } from '../types.ts';
 import { codeFrame, userFrame } from './code-frame.ts';
 import {
@@ -137,8 +137,23 @@ function appLogTally(appLog: readonly AppLogRecord[]): string | undefined {
   return parts.length === 0 ? undefined : parts.join(', ');
 }
 
+/**
+ * The steps whose unsaved recordings a result reports: its latest passing
+ * run's, and none for a result that did not pass. An earlier attempt's unsaved
+ * step may have been saved by the retry, and a failed attempt leaves every
+ * `act` after its last passing check unconfirmed by design, which only
+ * repeats the failure. For a serial member, the latest passing run also covers
+ * a retry that never reached the members.
+ */
+function passingRunSteps(
+  runs: readonly ({ readonly status: AttemptStatus; readonly steps: readonly StepRecord[] } | undefined)[],
+  passed: boolean,
+): readonly StepRecord[] {
+  return (passed ? runs.findLast((run) => run?.status === 'passed')?.steps : undefined) ?? [];
+}
+
 /** Details of an ordinary result: summed over its attempts, the error from the last. */
-function attemptDetails(attempts: readonly AttemptRecord[], configured: ConfiguredModel | undefined): ResultDetails {
+function attemptDetails(attempts: readonly AttemptRecord[], passed: boolean, configured: ConfiguredModel | undefined): ResultDetails {
   const steps = attempts.map((attempt) => attempt.steps);
   // A retry the run interrupted tells nothing; the failure before it is the verdict.
   const told = attempts.findLast((attempt) => attempt.status !== 'interrupted') ?? attempts.at(-1);
@@ -146,7 +161,7 @@ function attemptDetails(attempts: readonly AttemptRecord[], configured: Configur
     durationMs: attempts.reduce((total, attempt) => total + attempt.durationMs, 0),
     usage: stepsUsage(steps),
     models: stepsModelTally(steps),
-    cache: stepsCacheTally(steps),
+    cache: stepsCacheTally(steps, passingRunSteps(attempts, passed)),
     error: told?.error,
     videos: videoPaths(attempts),
     ...failureOf(told),
@@ -186,7 +201,7 @@ function videoPaths(attempts: readonly { readonly artifacts: readonly ArtifactRe
  * that attempt never ran (skipped, or absent after a launch failure) inherits
  * the attempt's error, since that is what stopped it.
  */
-function serialMemberDetails(group: SerialGroupRecord, testId: string, configured: ConfiguredModel | undefined): ResultDetails {
+function serialMemberDetails(group: SerialGroupRecord, testId: string, passed: boolean, configured: ConfiguredModel | undefined): ResultDetails {
   const runs = group.attempts.map((attempt) => ({
     attempt,
     member: attempt.members.find((member) => member.testId === testId),
@@ -199,7 +214,7 @@ function serialMemberDetails(group: SerialGroupRecord, testId: string, configure
     durationMs: runs.reduce((total, run) => total + (run.member?.durationMs ?? 0), 0),
     usage: stepsUsage(steps),
     models: stepsModelTally(steps),
-    cache: stepsCacheTally(steps),
+    cache: stepsCacheTally(steps, passingRunSteps(runs.map((run) => run.member), passed)),
     error: own?.error ?? (neverRan ? last?.attempt.error : undefined),
     // The group's recording covers every member, so a failed member points at it.
     videos: videoPaths(group.attempts),
@@ -705,12 +720,13 @@ export class ListReporter implements Reporter {
    */
   private detailsOf(result: RunEventResult): ResultDetails {
     const configured = this.configuredModel?.agent === result.agent ? this.configuredModel : undefined;
-    if (result.serialGroupId === undefined) return attemptDetails(result.attempts, configured);
+    const passed = result.status === 'passed' || result.status === 'flaky';
+    if (result.serialGroupId === undefined) return attemptDetails(result.attempts, passed, configured);
     const pending = this.pendingSerial.get(result.serialGroupId);
-    if (pending === undefined) return attemptDetails([], configured);
+    if (pending === undefined) return attemptDetails([], passed, configured);
     pending.remaining -= 1;
     if (pending.remaining <= 0) this.pendingSerial.delete(result.serialGroupId);
-    return serialMemberDetails(pending.group, result.test.id, configured);
+    return serialMemberDetails(pending.group, result.test.id, passed, configured);
   }
 
   private testFinished(result: RunEventResult): void {
